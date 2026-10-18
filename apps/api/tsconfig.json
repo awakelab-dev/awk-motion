@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "resolvePackageJsonExports": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "removeComments": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "incremental": true,
+    "strictPropertyInitialization": false,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

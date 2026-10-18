@@ -1,0 +1,37 @@
+{
+  "name": "wilox-motion",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:up": "docker compose up -d --wait wilox-db",
+    "db:stop": "docker compose stop wilox-db",
+    "db:migrate": "pnpm --filter @wilox/db migrate",
+    "db:status": "pnpm --filter @wilox/db migrate:status",
+    "db:drift": "pnpm --filter @wilox/db drift",
+    "db:check": "pnpm --filter @wilox/db check",
+    "db:admin": "pnpm --filter @wilox/db admin",
+    "db:studio": "pnpm --filter @wilox/db studio",
+    "db:import:check": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api import:storage --dry-run",
+    "db:import": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api import:storage",
+    "api:probe": "pnpm --filter @wilox/api probe",
+    "compare:runs": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api compare",
+    "api:limits": "pnpm --filter @wilox/api limits",
+    "queue:bench": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api bench",
+    "render:bench": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api render-bench",
+    "storage:migrate": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api storage",
+    "elevenlabs:purge": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api elevenlabs-purge",
+    "publications:restore": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api publications-restore"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.3",
+    "typescript": "~6.0.2"
+  }
+}

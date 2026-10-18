@@ -1,0 +1,90 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Tokens (estilo shadcn). Identidad "moderna" neutra: grafito + violeta eléctrico. */
+:root {
+  --background: #0b0b0e;
+  --foreground: #ededf0;
+  --card: #131317;
+  --card-foreground: #ededf0;
+  --popover: #16161b;
+  --popover-foreground: #ededf0;
+  --primary: #8b6cff;
+  --primary-foreground: #0b0b0e;
+  --secondary: #1d1d23;
+  --secondary-foreground: #ededf0;
+  --muted: #1a1a20;
+  --muted-foreground: #8e8e99;
+  --accent: #22222a;
+  --accent-foreground: #ededf0;
+  --destructive: #ff5c6c;
+  --success: #3ddc97;
+  --warning: #f5b94a;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.1);
+  --ring: #8b6cff;
+  --radius: 0.75rem;
+  /* Marca (hito 12, ADR-150): /api/brand.js puede cambiar cualquiera de estas variables. */
+  --glow-1: rgb(139 108 255 / 0.14);
+  --glow-2: rgb(61 220 200 / 0.06);
+  --mark-from: var(--primary);
+  --mark-to: #3ddcc8;
+  --brand-font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --brand-font-mono: 'Geist Mono', ui-monospace, monospace;
+}
+
+@theme inline {
+  --font-sans: var(--brand-font-sans);
+  --font-mono: var(--brand-font-mono);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-image:
+      radial-gradient(60rem 30rem at 85% -10%, var(--glow-1), transparent 60%),
+      radial-gradient(40rem 24rem at -10% 10%, var(--glow-2), transparent 60%);
+    background-attachment: fixed;
+  }
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}

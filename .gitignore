@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.turbo/
+/storage/
+.env
+*.tsbuildinfo
+.DS_Store
+_versiones/
+.smoke-dist/
+packages/db/src/generated/
+# Música (hito 5, ADR-044): los tracks de assets/music/ quedan fuera de git, salvo el de MUSIC_PATH
+assets/music/*
+!assets/music/Inspiring.mp3

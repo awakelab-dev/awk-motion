@@ -1,0 +1,31 @@
+# Wilox Motion · base de datos local (hito 3, ADR-027).
+# Proyecto propio ("wilox-motion"): no toca los contenedores de epica ni de app-factory.
+#   pnpm db:up      → levanta wilox-db y espera a que esté lista
+#   pnpm db:stop    → la detiene (los datos quedan en el volumen wilox-db-data)
+# Usuario, contraseña, base y puerto salen del .env de la raíz (ver .env.example).
+name: wilox-motion
+
+services:
+  wilox-db:
+    image: postgres:18.6-alpine
+    container_name: wilox-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${WILOX_DB_USER:-wilox}
+      POSTGRES_PASSWORD: ${WILOX_DB_PASSWORD:-wilox-local}
+      POSTGRES_DB: ${WILOX_DB_NAME:-wilox}
+    ports:
+      # Solo en el Mac (127.0.0.1), en un puerto distinto al 5432 de los otros contenedores.
+      - "127.0.0.1:${WILOX_DB_PORT:-5434}:5432"
+    volumes:
+      # Postgres 18: el volumen se monta en /var/lib/postgresql (los datos van en 18/docker).
+      - wilox-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  wilox-db-data:
+    name: wilox-db-data

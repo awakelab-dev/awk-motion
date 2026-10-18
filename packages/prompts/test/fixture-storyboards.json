@@ -1,0 +1,571 @@
+{
+ "pastel": {
+  "intro": {
+   "scene": "Empty opening frame: a few soft round bokeh dots and small confetti circles drift slowly across generous calm space, no text, no images."
+  },
+  "shots": [
+   {
+    "anchorWordIndex": 0,
+    "pfc": "Bienvenido al Módulo 1",
+    "idea": "Bienvenida al Módulo 1 del curso de IAAS",
+    "title": "WELCOME",
+    "keyframe": {
+     "layout": "text block left, one large circular video right",
+     "scene": "Left half, vertically centred: a small serif italic \"Bienvenido\" in coral (the single accent); below it the huge bold hero \"MÓDULO 1\"; then a smaller regular-weight navy supporting line \"Infecciones Asociadas a la Atención de Salud\" on two lines. Right half: one large circle with a thin mint outline, about 50 % of frame height, showing a health worker seen from behind, mid-stride, walking down a bright hospital corridor toward patient rooms. Generous margins on all sides.",
+     "summary": "Welcome title for Module 1 beside a large circular video of a hospital corridor.",
+     "texts": [
+      "Bienvenido",
+      "MÓDULO 1",
+      "Infecciones Asociadas a la Atención de Salud"
+     ],
+     "mediaFrames": [
+      {
+       "kind": "video",
+       "subject": "A health worker, seen from behind, keeps walking down a bright hospital corridor toward the patient rooms."
+      }
+     ]
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.2,
+      "action": "Several bokeh dots drift together and merge into one mint-outlined circle on the right, which inflates with elastic overshoot while the corridor footage fades in inside it."
+     },
+     {
+      "from": 1.2,
+      "to": 2.6,
+      "action": "The coral serif italic \"Bienvenido\" writes itself in on the left while \"MÓDULO 1\" stretches up from a thin line into huge bold letters with a playful bounce."
+     },
+     {
+      "from": 2.6,
+      "to": 4,
+      "action": "The supporting line \"Infecciones Asociadas a la Atención de Salud\" rises softly under the hero, word by word."
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "action": "Everything settles; only the footage keeps moving gently inside the circle while the particles drift."
+     }
+    ],
+    "endState": "Calm title block on the left and the corridor video playing softly in the large circle on the right.",
+    "sound": "soft bubble pops as the dots merge, a liquid morph blip as the circle inflates, light pen scratch for Bienvenido, a soft thump when MÓDULO 1 lands"
+   },
+   {
+    "anchorWordIndex": 22,
+    "pfc": "factores epidemiológicos",
+    "idea": "Objetivo: reconocer los factores epidemiológicos: patogenia, magnitud e impacto",
+    "title": "OBJECTIVE",
+    "keyframe": {
+     "layout": "centred hero title above a row of three equal circles",
+     "scene": "Upper centre: small light label \"RECONOCER\" above the bold hero \"FACTORES EPIDEMIOLÓGICOS\" on two lines, with EPIDEMIOLÓGICOS split in two colors at \"EPIDEM|IOLÓGICOS\" (the single accent). Lower centre: a row of three equal medium-small circles with thin pastel outlines and wide gutters, each with a small navy caption below: \"patogenia\" (bacteria dividing under a microscope), \"magnitud\" (a long ward of occupied beds), \"impacto\" (a nurse in profile adjusting a ventilator beside an ICU bed, abstract monitor waves). Side margins about 10 %.",
+     "summary": "Objective hero with a split word above three circles for pathogenesis, magnitude and impact.",
+     "texts": [
+      "RECONOCER",
+      "FACTORES / EPIDEMIOLÓGICOS",
+      "patogenia",
+      "magnitud",
+      "impacto"
+     ],
+     "mediaFrames": [
+      {
+       "kind": "video",
+       "subject": "Rod-shaped bacteria keep wriggling and dividing under a microscope."
+      },
+      {
+       "kind": "still",
+       "subject": "A wide view of a long hospital ward lined with many occupied beds."
+      },
+      {
+       "kind": "video",
+       "subject": "A nurse, seen in profile, keeps adjusting a ventilator beside an ICU bed while abstract monitor waves pulse."
+      }
+     ]
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.3,
+      "action": "The large corridor circle shrinks and slides to the lower centre, then splits like a liquid drop into three equal circles that bounce apart into a row, each filling with its own footage."
+     },
+     {
+      "from": 1.3,
+      "to": 2.3,
+      "action": "The left title block stretches and morphs into \"RECONOCER\" and the bold hero \"FACTORES EPIDEMIOLÓGICOS\" at upper centre; the second word splits into two colors with a wobble."
+     },
+     {
+      "from": 2.3,
+      "to": 4,
+      "action": "The captions \"patogenia\", \"magnitud\" and \"impacto\" pop in one by one under their circles with a light elastic overshoot."
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "action": "The composition settles; the footage moves subtly inside the circles while the particles drift."
+     }
+    ],
+    "endState": "Hero title centred above three calm circles with their captions, the footage moving gently.",
+    "sound": "a liquid split blip, three soft pops for the circles, a soft thump on the hero, three tiny bubbles for the captions"
+   },
+   {
+    "anchorWordIndex": 45,
+    "pfc": "cuatro bloques",
+    "idea": "El módulo se recorre en cuatro bloques",
+    "title": "FOUR BLOCKS",
+    "keyframe": {
+     "layout": "stacked title left third, 2x2 grid of equal rounded rectangles right",
+     "scene": "Left third, vertically centred: huge bold stacked title \"CUATRO / BLOQUES\" in navy. Right two-thirds: a 2x2 grid of four equal medium-small horizontal rounded rectangles with thin outlines (coral, mint, lavender, butter yellow) and wide gutters, each with a short caption beneath in its outline color: \"Definiciones clave\" (hands turning pages of a blurred clinical guide), \"Magnitud, impacto y patogenia\" (petri dishes with colonies), \"Factores epidemiológicos\" (gloved hands securing an IV catheter), \"Medidas de prevención\" (gloves, mask, gown on a tray). Color-coding is the only accent.",
+     "summary": "Stacked title left and a 2x2 grid of color-coded frames presenting the four blocks.",
+     "texts": [
+      "CUATRO / BLOQUES",
+      "Definiciones clave",
+      "Magnitud, impacto y patogenia",
+      "Factores epidemiológicos",
+      "Medidas de prevención"
+     ],
+     "mediaFrames": [
+      {
+       "kind": "video",
+       "subject": "Hands keep turning the pages of a clinical guidebook with softly blurred, unreadable text."
+      },
+      {
+       "kind": "still",
+       "subject": "Close-up of petri dishes with colorful bacterial colonies on a lab bench."
+      },
+      {
+       "kind": "video",
+       "subject": "Gloved hands keep securing an IV catheter line on a patient's forearm."
+      },
+      {
+       "kind": "still",
+       "subject": "Surgical gloves, a mask and a folded protective gown laid neatly on a steel tray."
+      }
+     ]
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.4,
+      "action": "The three circles glide to the right and stretch into rounded rectangles as a fourth drop splits off, settling into a 2x2 grid of equal frames while new footage morphs in."
+     },
+     {
+      "from": 1.4,
+      "to": 2.4,
+      "action": "The hero title melts, slides into the left third and reforms as the stacked \"CUATRO / BLOQUES\" with a springy overshoot."
+     },
+     {
+      "from": 2.4,
+      "to": 4.1,
+      "action": "The four color-coded captions ripple in beneath their frames in reading order, one per block."
+     },
+     {
+      "from": 4.1,
+      "to": 5,
+      "action": "The grid settles into perfect alignment; the footage keeps moving gently inside the frames."
+     }
+    ],
+    "endState": "Stacked title on the left and a calm 2x2 grid of framed images with color-coded captions.",
+    "sound": "a stretchy liquid morph, one bubble pop for the new frame, a playful swoosh for the title, four soft ticks for the captions"
+   },
+   {
+    "anchorWordIndex": 61,
+    "pfc": "medidas de prevención",
+    "idea": "El módulo cierra con las medidas de prevención",
+    "title": "PREVENTION",
+    "keyframe": {
+     "layout": "one large rounded rectangle video left, text stack right",
+     "scene": "Left: one large horizontal rounded rectangle with a thin butter-yellow outline, about 50 % of frame width, showing a health worker's hands in profile rubbing alcohol gel between the fingers beside a hospital bed. Right, vertically centred: small light label \"Cerramos el módulo\"; below it the big bold hero \"MEDIDAS DE\"; and, larger still, \"prevención\" in mint serif italic as the single accent. Balanced margins on all sides.",
+     "summary": "Closing frame: a large hand-hygiene video beside the hero phrase medidas de prevención.",
+     "texts": [
+      "Cerramos el módulo",
+      "MEDIDAS DE",
+      "prevención"
+     ],
+     "mediaFrames": [
+      {
+       "kind": "video",
+       "subject": "A health worker's hands, seen in profile, keep rubbing alcohol gel between the fingers beside a hospital bed."
+      }
+     ]
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.4,
+      "action": "The bottom-right yellow-outlined frame swells and glides left into a large horizontal rounded rectangle while the other three frames shrink into bokeh dots that drift away; the tray photo morphs into the hand-rubbing footage."
+     },
+     {
+      "from": 1.4,
+      "to": 2.6,
+      "action": "The caption \"Medidas de prevención\" flies to the right and stretches into the big hero \"MEDIDAS DE\", with \"prevención\" blossoming into mint serif italic."
+     },
+     {
+      "from": 2.6,
+      "to": 3.8,
+      "action": "The stacked title \"CUATRO / BLOQUES\" dissolves into confetti circles as the small label \"Cerramos el módulo\" slides in above the hero with a gentle bounce."
+     },
+     {
+      "from": 3.8,
+      "to": 5,
+      "action": "Everything settles; the hands keep rubbing softly inside the frame while the particles drift."
+     }
+    ],
+    "endState": "Calm closing composition: hand-hygiene video on the left and the prevention hero phrase on the right.",
+    "sound": "a deep liquid morph whoosh, soft bubble pops as the frames become dots, light confetti rustle, a soft thump when prevención lands"
+   }
+  ]
+ },
+ "dark": {
+  "intro": {
+   "scene": "Empty deep midnight-navy gradient with faint hexagonal micro-grid, slow drifting light particles, soft volumetric glow at center, a few out-of-focus cyan bokeh specks; no text, no objects in focus."
+  },
+  "shots": [
+   {
+    "anchorWordIndex": 0,
+    "pfc": "Módulo 1 · Infecciones Asociadas a la Atención de Salud",
+    "idea": "Bienvenida al Módulo 1 del curso IAAS",
+    "title": "WELCOME",
+    "keyframe": {
+     "layout": "text left, glass bacteria cluster right",
+     "scene": "Left half, vertically centred, kept within the left 50 % with generous margins: small medium-weight label \"MÓDULO 1\" in cyan with letter spacing; below it the large bold white hero in three lines \"INFECCIONES ASOCIADAS / A LA ATENCIÓN / DE SALUD\". Right 40 %: a floating cluster of glossy frosted glass capsule bacteria and two spherical cells with soft inner glow, one large capsule dominant in front, smaller ones behind with shallow depth of field. Only the label carries the accent.",
+     "summary": "Module title left in bold white type, cluster of glossy glass bacteria floating on the right.",
+     "texts": [
+      "MÓDULO 1",
+      "INFECCIONES ASOCIADAS / A LA ATENCIÓN / DE SALUD"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 0
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.2,
+      "action": "Drifting particles converge to the right and crystallise into glossy glass capsules that inflate and rotate into a cluster with cyan rim light."
+     },
+     {
+      "from": 1.2,
+      "to": 2.8,
+      "action": "A cyan light sweep crosses left; \"MÓDULO 1\" slides up letter by letter, then \"INFECCIONES ASOCIADAS\" snaps in with a bold kinetic scale-down."
+     },
+     {
+      "from": 2.8,
+      "to": 4.1,
+      "action": "\"A LA ATENCIÓN / DE SALUD\" wipes in beneath from a light bar; the cluster settles with gentle parallax."
+     },
+     {
+      "from": 4.1,
+      "to": 5,
+      "action": "Everything settles; capsules rotate slowly, caustics shimmer softly."
+     }
+    ],
+    "endState": "Calm title card with the bacteria cluster slowly rotating and faint particle drift.",
+    "sound": "soft airy whoosh, glass crystallise shimmer, light sweep, soft low impact on title"
+   },
+   {
+    "anchorWordIndex": 20,
+    "pfc": "reconocer los factores epidemiológicos",
+    "idea": "Objetivo: reconocer los factores epidemiológicos de las IAAS",
+    "title": "OBJECTIVE",
+    "keyframe": {
+     "layout": "centred hero glass lens over text",
+     "scene": "Centred composition. Upper-centre, dominant: a large glossy glass magnifying lens, slightly tilted; inside its refraction a small constellation of glass nodes linked by thin glowing threads, one node brighter, suggesting an epidemiological pattern. Below, centred: small light label \"Reconocer\", then bold white hero in two lines \"FACTORES / EPIDEMIOLÓGICOS\", then a medium supporting line \"relacionados con las IAAS\" with a thin cyan underline bar beneath \"IAAS\" as the only accent. Content about 60 % of the frame, wide margins on every side.",
+     "summary": "Big glass magnifying lens revealing a network of glass nodes above centred objective text.",
+     "texts": [
+      "Reconocer",
+      "FACTORES / EPIDEMIOLÓGICOS",
+      "relacionados con las IAAS"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 0
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.3,
+      "action": "The title text dissolves into light streaks while the large front capsule glides to centre and flattens into a circular glass lens with a handle; the smaller capsules shrink into glowing glass nodes drifting inside it."
+     },
+     {
+      "from": 1.3,
+      "to": 2.6,
+      "action": "The lens rises and tilts; thin glowing threads link the nodes into a network and one node brightens; \"Reconocer\" fades up beneath."
+     },
+     {
+      "from": 2.6,
+      "to": 4,
+      "action": "\"FACTORES / EPIDEMIOLÓGICOS\" builds with a kinetic stagger; \"relacionados con las IAAS\" slides in and a cyan bar draws under \"IAAS\"."
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "action": "Lens hovers gently, the node network pulses softly inside; all settles."
+     }
+    ],
+    "endState": "Lens hovering calmly with the glass node network softly pulsing inside, text still.",
+    "sound": "glass morph shimmer, soft whoosh, lens focus click, tiny node pings, light underline sweep"
+   },
+   {
+    "anchorWordIndex": 45,
+    "pfc": "cuatro bloques",
+    "idea": "El módulo se recorre en cuatro bloques",
+    "title": "FOUR BLOCKS",
+    "keyframe": {
+     "layout": "title top, row of four equal glass tiles",
+     "scene": "Top centre: bold white title \"Cuatro bloques\" with \"Cuatro\" in cyan as the only accent. Below, a single horizontal row of four identical medium-small frosted glass tiles, equal spacing, wide gutters and generous side margins. Each tile holds one glossy 3D glass icon: an open book, a rising bar chart with a small glass capsule beside it, a network of linked glass nodes, a glass shield. Under each tile its centred white caption: \"Definiciones clave\", \"Magnitud, impacto, patogenia\", \"Factores epidemiológicos\", \"Medidas de prevención\".",
+     "summary": "Four identical frosted glass tiles with 3D glass icons and captions, title above.",
+     "texts": [
+      "Cuatro bloques",
+      "Definiciones clave",
+      "Magnitud, impacto, patogenia",
+      "Factores epidemiológicos",
+      "Medidas de prevención"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 4
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.2,
+      "action": "The lens splits softly into four glass shards that fly outward and flatten into four frosted tiles aligning in a row; the node network shrinks into the third tile; the objective text dissolves upward into the title \"Cuatro bloques\"."
+     },
+     {
+      "from": 1.2,
+      "to": 2.8,
+      "action": "Icons pop into tiles left to right as the voice lists them: book, then bar chart with capsule."
+     },
+     {
+      "from": 2.8,
+      "to": 4.2,
+      "action": "The node network settles and the glass shield inflates into the last tile; captions fade up under each in sequence."
+     },
+     {
+      "from": 4.2,
+      "to": 5,
+      "action": "Tiles hover with subtle parallax, icons rotate slowly; frame settles."
+     }
+    ],
+    "endState": "Four tiles floating evenly in a row, icons turning slowly, all captions visible.",
+    "sound": "glass split shimmer, four staggered glass chimes, soft whoosh on title"
+   },
+   {
+    "anchorWordIndex": 61,
+    "pfc": "medidas de prevención",
+    "idea": "El módulo cierra con las medidas de prevención",
+    "title": "PREVENTION",
+    "keyframe": {
+     "layout": "large glass shield left, text right",
+     "scene": "Left 45 %: dominant large glossy glass shield, slightly angled, with a soft cyan inner glow; a few small glass capsule bacteria drifting off its surface, deflected. Right side, vertically centred, left-aligned: small light uppercase label \"CERRAMOS EL MÓDULO\", then huge bold white hero \"Medidas de / prevención\" with a soft cyan glow on \"prevención\" as the only accent. Balanced margins all around.",
+     "summary": "Big glowing glass shield deflecting bacteria on the left, closing prevention text on the right.",
+     "texts": [
+      "CERRAMOS EL MÓDULO",
+      "Medidas de / prevención"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 0
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.2,
+      "action": "The three left tiles and captions slide away and dissolve into particles; the fourth tile's shield icon lifts out and glides left."
+     },
+     {
+      "from": 1.2,
+      "to": 2.6,
+      "action": "The shield scales up into a large glass shield, a cyan pulse ripples across it and small capsules bounce off its surface."
+     },
+     {
+      "from": 2.6,
+      "to": 4,
+      "action": "\"CERRAMOS EL MÓDULO\" fades in on the right, then \"Medidas de / prevención\" builds with bold kinetic stagger and a soft glow blooms on \"prevención\"."
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "action": "Shield rotates slightly and rests; bacteria drift slowly away; calm."
+     }
+    ],
+    "endState": "Glowing shield resting with bacteria drifting off, closing title steady.",
+    "sound": "soft whoosh, glass shield resonance hum, gentle deflection pings, warm final glass chime"
+   }
+  ]
+ },
+ "light": {
+  "intro": {
+   "scene": "Clean luminous near-white to pale ice blue gradient with a faint hexagonal micro-grid, slow drifting soft light particles and gentle bokeh, a few tiny out-of-focus frosted glass cells floating near the edges; empty, calm, no text."
+  },
+  "shots": [
+   {
+    "anchorWordIndex": 0,
+    "pfc": "Bienvenido al Módulo 1",
+    "idea": "Bienvenida al Módulo 1 del curso IAAS",
+    "title": "WELCOME",
+    "keyframe": {
+     "layout": "text left, glass bacteria cluster right",
+     "scene": "Left half, vertically centred with a wide left margin: small light label \"Bienvenido\", below it huge bold uppercase hero \"MÓDULO 1\" in teal as the only accent, then a medium steel-blue sentence-case supporting line \"Infecciones Asociadas a la Atención de Salud\" set in two lines. Right half: a dominant floating cluster of one large glossy capsule-shaped glass bacterium with two smaller spherical glass cells behind it, about 35 % of frame width, crisp dark-teal rims and soft shadows. Generous margins on every side; nothing near the edges.",
+     "summary": "Module 1 welcome title on the left, large glossy glass bacterium cluster on the right.",
+     "texts": [
+      "Bienvenido",
+      "MÓDULO 1",
+      "Infecciones Asociadas a la Atención de Salud"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 0
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.2,
+      "action": "Floating particles converge on the right and condense into a spinning glass sphere that stretches into the large capsule bacterium, two smaller cells budding out behind it."
+     },
+     {
+      "from": 1.2,
+      "to": 2.6,
+      "action": "\"Bienvenido\" slides in from the left in light weight, then \"MÓDULO 1\" rises in with a soft scale bounce as the teal color fills it."
+     },
+     {
+      "from": 2.6,
+      "to": 4.1,
+      "action": "The supporting line \"Infecciones Asociadas a la Atención de Salud\" reveals word by word in steel blue, synced with the voice, while the bacterium slowly rotates with caustic highlights."
+     },
+     {
+      "from": 4.1,
+      "to": 5,
+      "action": "Everything settles; only a slow bacterium rotation and drifting bokeh remain."
+     }
+    ],
+    "endState": "Calm title block on the left and the slowly rotating glass bacterium cluster on the right.",
+    "sound": "soft rising whoosh, glass crystallizing chime, soft typographic impacts, subtle glassy pops"
+   },
+   {
+    "anchorWordIndex": 16,
+    "pfc": "reconocer los factores epidemiológicos",
+    "idea": "Objetivo: reconocer los factores epidemiológicos",
+    "title": "OBJECTIVE",
+    "keyframe": {
+     "layout": "centred glass lens hero above stacked text",
+     "scene": "Upper centre: a dominant glossy 3D glass magnifying lens, about 30 % of frame width, hovering over a small frosted glass globe dotted with glowing teal node points linked by thin glass lines, the nodes enlarged and refracted through the lens; no labels or map text. Below, centred: small light label \"Serás capaz de\", huge bold uppercase hero \"RECONOCER\", and a medium steel-blue supporting line \"los factores epidemiológicos\" with a thin teal underline bar as the only accent. Symmetric, wide margins top and bottom.",
+     "summary": "Glass lens magnifying a node-dotted glass globe, objective text centred below.",
+     "texts": [
+      "Serás capaz de",
+      "RECONOCER",
+      "los factores epidemiológicos"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 0
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.3,
+      "action": "The left text block dissolves into light streaks while the bacterium cluster glides to the upper centre and its cells fuse into a frosted glass globe as tiny node points light up across it."
+     },
+     {
+      "from": 1.3,
+      "to": 2.5,
+      "action": "A glass ring spins in from the side, gains depth and becomes a magnifying lens that locks over the globe, the refraction enlarging the linked nodes with a caustic flash."
+     },
+     {
+      "from": 2.5,
+      "to": 4,
+      "action": "\"Serás capaz de\" fades up, \"RECONOCER\" pops in bold with a gentle scale settle, then \"los factores epidemiológicos\" slides up as the teal underline draws left to right."
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "action": "The lens drifts slightly with parallax over the slowly turning globe and the frame calms."
+     }
+    ],
+    "endState": "Lens hovering calmly over the slowly turning glass globe with the objective text centred below.",
+    "sound": "glass whoosh, soft node pings, lens click with soft chime, gentle text impact, underline swipe"
+   },
+   {
+    "anchorWordIndex": 31,
+    "pfc": "patogenia, magnitud e impacto",
+    "idea": "Tres aspectos de las IAAS: patogenia, magnitud, impacto",
+    "title": "THREE ASPECTS",
+    "keyframe": {
+     "layout": "title top, row of three equal glass tiles",
+     "scene": "Top centre, below a generous top margin: bold uppercase title \"LAS IAAS\", with \"IAAS\" in teal as the only accent. Below, a centred horizontal row of three identical medium-small frosted glass tiles with equal wide gutters and about 10 % side margins. Each tile holds one glossy 3D glass icon, with its bold sentence-case navy caption underneath: a capsule bacterium entering a cell for \"Patogenia\", abstract rising glass bars with no numbers for \"Magnitud\", and a glass hospital cross emitting a ripple for \"Impacto\".",
+     "summary": "Title LAS IAAS above three equal glass tiles: pathogenesis, magnitude, impact.",
+     "texts": [
+      "LAS IAAS",
+      "Patogenia",
+      "Magnitud",
+      "Impacto"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 3
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.2,
+      "action": "The objective text slides down and fades while the magnifying lens flattens and splits into three frosted glass tiles that fan out into a row; the globe dissolves into teal particles."
+     },
+     {
+      "from": 1.2,
+      "to": 2.4,
+      "action": "\"LAS IAAS\" drops in at the top as particles gather in the first tile into a capsule bacterium diving into a glass cell, with \"Patogenia\" appearing beneath."
+     },
+     {
+      "from": 2.4,
+      "to": 4,
+      "action": "Glass bars grow upward in the second tile with \"Magnitud\", then a glass cross emits a ripple in the third with \"Impacto\", each synced to the voice."
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "action": "The tiles settle with a gentle float while the icons rotate slowly."
+     }
+    ],
+    "endState": "Three equal tiles resting in a row under the title, icons gently rotating.",
+    "sound": "glass split crack, particle shimmer, three sequential glass flips, bar rising pop, soft ripple chime"
+   },
+   {
+    "anchorWordIndex": 47,
+    "pfc": "cuatro bloques",
+    "idea": "El módulo se recorre en cuatro bloques",
+    "title": "FOUR BLOCKS",
+    "keyframe": {
+     "layout": "title left, 2x2 glass tile grid right",
+     "scene": "Left third, vertically centred: small light label \"Recorreremos\" above huge bold uppercase \"CUATRO BLOQUES\" stacked in two lines, with a thin teal underline bar under \"CUATRO\" as the only accent. Right: a 2x2 grid of four identical medium-small frosted glass tiles with equal gutters and generous outer margins. Each tile holds a glossy 3D glass icon with its caption below: an open glass book for \"Definiciones clave\", rising glass bars with a ripple ring for \"Magnitud, impacto, patogenia\", a glass globe with nodes for \"Factores epidemiológicos\", and a glass shield for \"Medidas de prevención\".",
+     "summary": "Four-blocks title on the left, 2x2 grid of glass icon tiles on the right.",
+     "texts": [
+      "Recorreremos",
+      "CUATRO BLOQUES",
+      "Definiciones clave",
+      "Magnitud, impacto, patogenia",
+      "Factores epidemiológicos",
+      "Medidas de prevención"
+     ],
+     "mediaFrames": [],
+     "repeatedItems": 4
+    },
+    "animation": [
+     {
+      "from": 0,
+      "to": 1.3,
+      "action": "\"LAS IAAS\" slides left and morphs into \"Recorreremos / CUATRO BLOQUES\" as the teal underline draws under \"CUATRO\"; the three tiles glide right into a grid while a fourth tile materializes from light."
+     },
+     {
+      "from": 1.3,
+      "to": 2.8,
+      "action": "The first tile flips to reveal the glass book with \"Definiciones clave\"; the former bars and ripple merge in the second tile with \"Magnitud, impacto, patogenia\"."
+     },
+     {
+      "from": 2.8,
+      "to": 4.2,
+      "action": "The third tile flips to a spinning glass globe with nodes and \"Factores epidemiológicos\"; the fourth forms a shining glass shield with \"Medidas de prevención\"."
+     },
+     {
+      "from": 4.2,
+      "to": 5,
+      "action": "The grid settles evenly and the icons turn slowly with soft caustics."
+     }
+    ],
+    "endState": "Calm 2x2 grid of glass tiles beside the four-blocks title.",
+    "sound": "sliding whoosh, glass materialize chime, four sequential glass flips, soft shield shimmer"
+   }
+  ]
+ }
+}

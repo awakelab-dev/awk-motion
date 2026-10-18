@@ -1,0 +1,45 @@
+{
+  "id": "awakelab",
+  "name": "Awakelab Motion",
+  "tagline": "",
+  "loginTagline": "",
+  "colors": {
+    "background": "#011932",
+    "foreground": "#F0F3FC",
+    "card": "#012142",
+    "card-foreground": "#F0F3FC",
+    "popover": "#01264C",
+    "popover-foreground": "#F0F3FC",
+    "primary": "#0FCED3",
+    "primary-foreground": "#011932",
+    "secondary": "#003260",
+    "secondary-foreground": "#F0F3FC",
+    "muted": "#01264C",
+    "muted-foreground": "#72A3C4",
+    "accent": "#003670",
+    "accent-foreground": "#F0F3FC",
+    "border": "rgb(114 163 196 / 0.18)",
+    "input": "rgb(114 163 196 / 0.24)",
+    "ring": "#19F7F1",
+    "glow-1": "rgb(25 247 241 / 0.10)",
+    "glow-2": "rgb(11 147 170 / 0.12)",
+    "mark-from": "#19F7F1",
+    "mark-to": "#0B93AA"
+  },
+  "font": {
+    "sans": "'Poppins', ui-sans-serif, system-ui, sans-serif",
+    "href": "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+  },
+  "logo": {
+    "fullHeight": 26,
+    "mark": "https://media.awakelab.world/MARCA_AWK26/awakelab_isotipo_fondo-oscuro_transparente.png",
+    "label": "Motion"
+  },
+  "favicon": "https://media.awakelab.world/MARCA_AWK26/awakelab_isotipo_fondo-blanco_transparente.png",
+  "nav": [
+    "proyectos",
+    "generar",
+    "temas"
+  ],
+  "features": {}
+}

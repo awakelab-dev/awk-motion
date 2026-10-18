@@ -1,0 +1,787 @@
+// Wilox Motion · esquema de la base de datos (hito 3, ADR-026 y ADR-027).
+// Los medios siguen en storage/ como archivos: aquí solo hay metadatos, estado, prompts y rutas
+// relativas a STORAGE_DIR. Las partes flexibles (ThemeStyle, storyboard, plan…) van en jsonb y se
+// validan con los esquemas zod de @wilox/shared al leer y escribir.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────────────────────────────────────── usuarios
+
+enum Role {
+  admin
+  user
+}
+
+model User {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  /// Siempre en minúsculas.
+  email        String    @unique
+  name         String?
+  /// argon2id (formato PHC: $argon2id$v=19$…).
+  passwordHash String
+  role         Role      @default(user)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  sessions    Session[]
+  themes      Theme[]
+  projects    Project[]
+  generations Generation[]
+  jobs        GenerationJob[]
+  pronunciations PronunciationRule[]
+  scriptStyles   ScriptStyle[]
+  downloadBatches DownloadBatch[]
+  /// Proyectos compartidos con este usuario (hito 11, ADR-142).
+  projectShares  ProjectShare[] @relation("ShareUser")
+  /// Proyectos que este usuario compartió con otros.
+  sharedByMe     ProjectShare[] @relation("ShareBy")
+}
+
+/// Sesión de la cookie httpOnly. Solo se guarda el sha256 del token.
+model Session {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ───────────────────────────────────────────────────────────── temas (Estudio)
+
+enum ThemeStatus {
+  draft
+  saved
+}
+
+/// Tema del Estudio. Los 3 temas base siguen solo en código (BASE_THEMES) y no tienen fila.
+model Theme {
+  /// Slug ASCII + 6 caracteres (el id de siempre: storage/themes/<id>/).
+  id            String      @id
+  ownerId       String      @db.Uuid
+  status        ThemeStatus @default(draft)
+  /// Sube con cada cambio del ThemeStyle.
+  version       Int         @default(1)
+  /// ThemeBrief (lo que se escribió en el formulario).
+  brief         Json
+  /// ThemeStyle.
+  style         Json
+  /// Tema del que se duplicó (base o del Estudio).
+  basedOn       String?
+  /// Prueba cuyo frame A es la miniatura.
+  thumbnailTest Int?
+  proposalNotes String?
+  /// Carpeta relativa a STORAGE_DIR (themes/<id>).
+  dir           String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  /// Papelera: la carpeta se mueve a themes/_papelera/ y la fila queda marcada.
+  deletedAt     DateTime?
+
+  owner       User             @relation(fields: [ownerId], references: [id])
+  references  ThemeReference[]
+  tests       ThemeTest[]
+  prompts     Prompt[]
+  jobs        GenerationJob[]
+  generations Generation[]
+
+  @@index([ownerId, status])
+}
+
+model ThemeReference {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  themeId      String
+  /// Nombre normalizado dentro de referencias/ (ref_01.jpg…).
+  file         String
+  originalName String
+  position     Int
+  /// media_id de Higgsfield en caché (se vuelve a subir si falta).
+  mediaId      String?
+  url          String?
+  createdAt    DateTime @default(now())
+
+  theme Theme @relation(fields: [themeId], references: [id], onDelete: Cascade)
+
+  @@unique([themeId, file])
+}
+
+/// Prueba estándar del Estudio (frames A y B + clip A→B). Frames y clip son pequeños y fijos: jsonb.
+model ThemeTest {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  themeId          String
+  n                Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  /// ThemeTestStatus.
+  status           String
+  message          String   @default("")
+  themeVersion     Int
+  /// Copia del ThemeStyle con la que se hizo (theme.snapshot.json).
+  snapshot         Json
+  /// ThemeTestFrame[].
+  frames           Json
+  withClip         Boolean  @default(false)
+  /// ThemeTestClip.
+  clip             Json
+  reviewSummary    String?
+  /// StyleSuggestion[].
+  suggestions      Json?
+  creditsEstimated Float    @default(0)
+  error            String?
+
+  theme   Theme           @relation(fields: [themeId], references: [id], onDelete: Cascade)
+  prompts Prompt[]
+  jobs    GenerationJob[]
+
+  @@unique([themeId, n])
+}
+
+// ───────────────────────────────────────────────────────────── proyectos (ADR-030)
+
+/// Contenedor de videos (curso, lección, cliente). Todo video vive en un proyecto (hito 4, ADR-035):
+/// los que no tienen uno propio están en "Sin clasificar", el proyecto del sistema de cada usuario.
+model Project {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  ownerId     String    @db.Uuid
+  name        String
+  description String?
+  /// Proyecto del sistema: 'unclassified' = "Sin clasificar" (uno por usuario; no se renombra, archiva
+  /// ni elimina). Nulo = proyecto normal (Postgres no considera iguales dos nulos en el índice único).
+  system      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  archivedAt  DateTime?
+  /// Entrega (hito 6, ADR-065): logo subido (archivo en storage/projects/<id>/) y sus ajustes por defecto:
+  /// { logo?: { file, mime, width?, height?, fileName, version }, settings: { corner, widthPct, marginPct, effect, opacity } }.
+  delivery    Json?
+  /// Estilo de guion de la última importación en este proyecto (hito 6, ADR-072): se propone por defecto.
+  scriptStyleId String?   @db.Uuid
+  /// Papelera (hito 9, T3d, ADR-106): en la papelera desde esta fecha (con sus videos); se elimina sola a los 180 días.
+  trashedAt   DateTime?
+  /// Eliminado definitivamente (desde la papelera o a los 180 días): el usuario ya no lo ve; los datos y archivos se
+  /// conservan, inaccesibles, para un futuro superadministrador.
+  deletedAt   DateTime?
+  /// Público (hito 11, ADR-142): desde esta fecha lo ven y lo gestionan todos los usuarios de la app (nulo = no).
+  /// «Sin clasificar» nunca es público.
+  publicAt    DateTime?
+
+  owner       User           @relation(fields: [ownerId], references: [id])
+  generations Generation[]
+  scriptStyle ScriptStyle?   @relation(fields: [scriptStyleId], references: [id], onDelete: SetNull)
+  shares      ProjectShare[]
+
+  @@unique([ownerId, system])
+  @@index([ownerId, updatedAt(sort: Desc)])
+}
+
+/// Proyecto compartido con un usuario de la app (hito 11, ADR-142): puede hacer todo lo del proyecto salvo lo
+/// irreversible (papelera, restaurar, archivar, eliminar) y compartir, que quedan para el dueño.
+model ProjectShare {
+  projectId  String   @db.Uuid
+  userId     String   @db.Uuid
+  /// Quién lo compartió (el dueño o el admin).
+  sharedById String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User    @relation("ShareUser", fields: [userId], references: [id], onDelete: Cascade)
+  sharedBy User    @relation("ShareBy", fields: [sharedById], references: [id])
+
+  @@id([projectId, userId])
+  @@index([userId])
+}
+
+// ───────────────────────────────────────────────────────────── generaciones
+
+enum GenerationMode {
+  mcp
+  api
+  mock
+}
+
+/// Los mismos valores que RunStatus en @wilox/shared.
+enum GenerationStatus {
+  queued
+  voice
+  timings
+  storyboard
+  keyframes
+  awaiting_approval
+  clips
+  post
+  render
+  done
+  error
+  /// Detenido por el usuario (hito 5, ADR-052): sale de la cola; "Reanudar" sigue desde donde quedó.
+  paused
+}
+
+/// Los mismos valores que AssetStatus en @wilox/shared.
+enum AssetStatus {
+  pending
+  generating
+  ready
+  error
+}
+
+model Generation {
+  /// El id de siempre (20260924-103824-dark-906f57): URLs y carpetas no cambian.
+  id               String                   @id
+  ownerId          String                   @db.Uuid
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  mode             GenerationMode
+  /// Id del tema al crearla: 'dark' | 'light' | 'pastel' o el id de un tema del Estudio.
+  themeKey         String
+  /// FK solo para temas del Estudio (los base no tienen fila). La copia de themeCopy manda.
+  themeId          String?
+  themeName        String?
+  /// Copia del tema y de sus referencias (runs/<id>/theme.json): { style, references }.
+  themeCopy        Json
+  voiceId          String
+  /// Texto de la locución.
+  text             String
+  /// to_tsvector('spanish', unaccent(text)), mantenido por un trigger (migración search).
+  /// Prisma no lo escribe ni lo lee: la búsqueda va por SQL (searchGenerations).
+  searchVector     Unsupported("tsvector")?
+  status           GenerationStatus         @default(queued)
+  message          String                   @default("")
+  error            String?
+  /// El usuario aprobó los fotogramas (fase 2).
+  approved         Boolean                  @default(false)
+  durationSec      Float?
+  totalFrames      Int?
+  /// Rutas relativas a la carpeta de la generación.
+  voicePath        String?
+  finalPath        String?
+  finalFrames      Int?
+  creditsEstimated Float                    @default(0)
+  balanceBefore    Float?
+  balanceAfter     Float?
+  /// TimedWord[] (tiempos por palabra).
+  words            Json?
+  /// Storyboard de Opus (tras la revisión).
+  storyboard       Json?
+  /// PlannedClip[].
+  plan             Json?
+  /// Shot[] (planos vigentes, incluidos los reescritos al regenerar).
+  shots            Json?
+  /// Carpeta relativa a STORAGE_DIR (runs/<id>).
+  dir              String
+  /// Proyecto al que pertenece (obligatorio desde el hito 4; "Sin clasificar" si no tiene uno propio).
+  projectId        String                   @db.Uuid
+  /// Versión de la que sale (cambio de texto o recreación).
+  parentId         String?
+  /// Música de fondo (hito 5, ADR-044): nombre del archivo en assets/music/; nulo = "Sin música".
+  /// Las correcciones y los re-render usan siempre este track.
+  musicTrack       String?
+  /// Sonido de los clips (hito 6, ADR-059): 'model' (audio nativo de MiniMax) | 'synth' (SFX sintetizados)
+  /// | 'none'. Nulo = videos anteriores al hito 6, que se hicieron con SFX sintetizados.
+  soundMode        String?
+  /// Ajuste del sonido del modelo en dB sobre la normalización (pasos de 3 dB).
+  soundGainDb      Float                    @default(0)
+  /// Cómo se pidió la locución (hito 10, ADR-133): 'whole' (un solo pedido) | 'paragraph'; nulo = por párrafo.
+  voiceMode        String?
+  /// Ajuste fino de la entrega de este video (hito 6, ADR-065): { settings?: ajustes del logo, posterSec? }.
+  delivery         Json?
+  /// Clips insertados o subidos fuera de la locución (hito 6, ADR-073): InsertState[].
+  inserts          Json?
+  /// Guion importado (hito 5, ADR-049): { rows: [{ voice, scene?, expression?, layout?, voiceTag? }], structure?, source? }.
+  /// Cada fila es un párrafo de la locución; su escena manda en los planos de ese tramo.
+  script           Json?
+  /// Papelera (hito 9, T3d, ADR-106): en la papelera desde esta fecha; se elimina sola a los 180 días.
+  trashedAt          DateTime?
+  /// Fue a la papelera con su proyecto (vuelve con él al restaurarlo).
+  trashedWithProject Boolean   @default(false)
+  /// Eliminado definitivamente: el usuario ya no lo ve; datos y archivos se conservan, inaccesibles.
+  deletedAt          DateTime?
+  /// Duplicado de este video (hito 9, T3e, ADR-107): copia sin costo; sin FK (el original puede eliminarse).
+  copyOfId           String?
+
+  owner      User            @relation(fields: [ownerId], references: [id])
+  theme      Theme?          @relation(fields: [themeId], references: [id], onDelete: SetNull)
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  parent     Generation?     @relation("GenerationVersions", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Generation[]    @relation("GenerationVersions")
+  paragraphs Paragraph[]
+  keyframes  Keyframe[]
+  clips      Clip[]
+  prompts    Prompt[]
+  jobs       GenerationJob[]
+  logs       LogEntry[]
+  reviews    ReviewComment[]
+  publications Publication[]
+
+  @@index([ownerId, createdAt(sort: Desc)])
+  @@index([ownerId, status])
+  @@index([ownerId, themeKey])
+  @@index([ownerId, trashedAt])
+  @@index([projectId])
+  @@index([parentId])
+  @@index([searchVector], type: Gin)
+}
+
+model Paragraph {
+  id           String @id @default(uuid(7)) @db.Uuid
+  generationId String
+  index        Int
+  text         String
+  startSec     Float
+  durationSec  Float
+  /// Versión de la locución (hito 5, ADR-048): "Rehacer audio" crea parrafoNN_v2…
+  version      Int    @default(1)
+  /// Texto que se envió a la voz si difiere del texto (reglas de pronunciación).
+  spokenText   String?
+
+  generation Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, index])
+}
+
+/// Fotograma clave (K0 = intro; Ki = estado final del clip i). Una fila por hueco; sus versiones aparte.
+model Keyframe {
+  id           String      @id @default(uuid(7)) @db.Uuid
+  generationId String
+  index        Int
+  label        String
+  texts        String[]
+  /// Prompt de la versión vigente.
+  prompt       String
+  status       AssetStatus @default(pending)
+  /// Versión vigente.
+  version      Int         @default(1)
+  error        String?
+  /// Revisión visual de Opus: { verdict, issues, revisedScene? }.
+  review       Json?
+  /// Regeneración en curso (hito 5, ADR-046): { change?, revisedScene?, issues?, stage } para retomarla tras un reinicio.
+  pending      Json?
+  /// Versión vigente mientras hay una propuesta sin aplicar en un video terminado (hito 6, ADR-071).
+  previous     Json?
+  updatedAt    DateTime    @updatedAt
+
+  generation Generation        @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  versions   KeyframeVersion[]
+
+  @@unique([generationId, index])
+}
+
+model KeyframeVersion {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  keyframeId String   @db.Uuid
+  version    Int
+  /// Relativa a la carpeta de la generación (keyframes/K01_v2.png).
+  path       String?
+  prompt     String
+  /// job_id / media_id de Higgsfield, o ruta en modo API. Vacío = hay que subirla.
+  remoteRef  String?
+  createdAt  DateTime @default(now())
+
+  keyframe Keyframe @relation(fields: [keyframeId], references: [id], onDelete: Cascade)
+
+  @@unique([keyframeId, version])
+}
+
+model Clip {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  generationId    String
+  index           Int
+  title           String
+  startFrame      Int
+  /// Frame donde empieza el siguiente segmento IA (o el final).
+  slotEndFrame    Int
+  prompt          String
+  status          AssetStatus @default(pending)
+  version         Int         @default(1)
+  deliveredFrames Int?
+  ssimStart       Float?
+  ssimEnd         Float?
+  error           String?
+  /// Versiones de los fotogramas de inicio y fin con que se hizo la versión vigente (corrección, ADR-033).
+  startKeyVersion Int?
+  endKeyVersion   Int?
+  /// Indicación del editor al regenerar el clip (se añade al prompt).
+  note            String?
+  /// task_id de la versión vigente en el proveedor (hito 5, ADR-046): tras un reinicio se sigue consultando.
+  taskId          String?
+  /// Sonido de este clip (hito 6, ADR-059): nulo = el del video; 'mute' | 'synth'.
+  soundMode       String?
+  /// Sonoridad (LUFS) del audio nativo del clip antes de normalizar; nulo = sin medir o sin sonido.
+  soundLufs       Float?
+  updatedAt       DateTime    @updatedAt
+
+  generation Generation    @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  versions   ClipVersion[]
+
+  @@unique([generationId, index])
+}
+
+model ClipVersion {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  clipId    String   @db.Uuid
+  version   Int
+  /// Clip IA en bruto, relativo a la carpeta de la generación (clips/clip01_ia_v1.mp4).
+  path      String?
+  prompt    String
+  remoteRef String?
+  createdAt DateTime @default(now())
+
+  clip Clip @relation(fields: [clipId], references: [id], onDelete: Cascade)
+
+  @@unique([clipId, version])
+}
+
+/// Superprompts y demás textos enviados a los modelos. Pertenece a una generación, a una prueba
+/// del Estudio o a un tema (propuestas de Opus). También se siguen escribiendo en prompts/.
+model Prompt {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  generationId String?
+  themeTestId  String?  @db.Uuid
+  themeId      String?
+  /// Nombre del archivo (K01_superprompt_v2.md, storyboard.json…).
+  name         String
+  /// storyboard | keyframe | clip | review | timing | proposal | other
+  kind         String
+  version      Int      @default(1)
+  content      String
+  createdAt    DateTime @default(now())
+
+  generation Generation? @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  themeTest  ThemeTest?  @relation(fields: [themeTestId], references: [id], onDelete: Cascade)
+  theme      Theme?      @relation(fields: [themeId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, name])
+  @@unique([themeTestId, name])
+  @@unique([themeId, name])
+}
+
+enum JobKind {
+  tts
+  timing
+  llm
+  image
+  video
+  upload
+}
+
+enum JobStatus {
+  running
+  succeeded
+  failed
+}
+
+/// Un trabajo en un proveedor (una imagen, un clip, una locución, una llamada a Opus…) con su costo.
+model GenerationJob {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  /// Dueño: permite totales por usuario sin pasar por la generación o el tema.
+  ownerId      String    @db.Uuid
+  generationId String?
+  themeTestId  String?   @db.Uuid
+  themeId      String?
+  kind         JobKind
+  /// Qué produce: "K01 v2", "clip03 v1", "tts p1", "storyboard", "frame A v1"…
+  target       String
+  /// higgsfield | minimax | elevenlabs | openai | anthropic | mock
+  provider     String
+  model        String
+  /// job_id / task_id / request id del proveedor.
+  externalId   String?
+  status       JobStatus @default(running)
+  /// Créditos de Higgsfield (modo MCP).
+  credits      Float?
+  /// Costo en USD (modo API o LLM).
+  costUsd      Decimal?  @db.Decimal(12, 6)
+  /// Tokens, caracteres, segundos… lo que el proveedor factura.
+  usage        Json?
+  url          String?
+  error        String?
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  durationMs   Int?
+
+  owner      User        @relation(fields: [ownerId], references: [id])
+  generation Generation? @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  themeTest  ThemeTest?  @relation(fields: [themeTestId], references: [id], onDelete: Cascade)
+  theme      Theme?      @relation(fields: [themeId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, startedAt])
+  @@index([generationId])
+  @@index([themeId])
+}
+
+enum LogLevel {
+  info
+  warn
+  error
+}
+
+model LogEntry {
+  id           BigInt   @id @default(autoincrement())
+  generationId String
+  at           DateTime @default(now())
+  level        LogLevel @default(info)
+  message      String
+
+  generation Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@index([generationId, id])
+}
+
+/// Caché de los tracks de assets/music/ (hito 5, ADR-044). La carpeta manda: si cambia el tamaño o la
+/// fecha de un archivo se vuelve a medir. lufs = sonoridad integrada (EBU R128) para igualar el volumen.
+model MusicTrack {
+  name        String   @id
+  sizeBytes   BigInt
+  mtimeMs     Float
+  durationSec Float
+  lufs        Float?
+  measuredAt  DateTime @default(now())
+}
+
+enum QueueStatus {
+  queued
+  running
+  done
+  failed
+  cancelled
+}
+
+/// Cola global de trabajos por recurso (hito 5, ADR-045): una fila por trabajo de un proveedor o de
+/// ffmpeg (una locución, una llamada a Opus, un fotograma, un clip, un segmento del post, el render).
+/// Se toma por prioridad (hora de lanzamiento del video) y orden de llegada con FOR UPDATE SKIP LOCKED.
+model QueueTask {
+  id           String      @id @default(uuid(7)) @db.Uuid
+  ownerId      String      @db.Uuid
+  /// Video al que pertenece (nulo en las pruebas del Estudio). Sin FK: la tarea puede crearse antes de
+  /// que la fila de la generación termine de escribirse.
+  generationId String?
+  themeId      String?
+  /// elevenlabs | anthropic | openai | minimax | higgsfield | ffmpeg
+  resource     String
+  /// tts | timing | llm | image | video | post | render
+  kind         String
+  /// Qué produce: "K03_v2", "clip02_ia_v1", "Storyboard"…
+  target       String
+  /// Hora de lanzamiento del video (las correcciones heredan la de su video); el Estudio va primero.
+  priority     DateTime
+  seq          BigInt      @default(autoincrement())
+  status       QueueStatus @default(queued)
+  attempts     Int         @default(0)
+  /// Espera tras un 429/5xx (Retry-After o espera creciente).
+  nextRunAt    DateTime    @default(now())
+  /// task_id de MiniMax u otro id del proveedor.
+  externalId   String?
+  error        String?
+  createdAt    DateTime    @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  @@index([resource, status, priority, seq])
+  @@index([generationId, status])
+}
+
+/// Reglas de pronunciación de cada usuario (hito 5, ADR-048): "IAAS" → "I, A, A, S". Se aplican al texto
+/// que se envía a la voz en todos sus videos; el texto del video no cambia.
+model PronunciationRule {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  ownerId   String   @db.Uuid
+  /// Palabra o frase tal como se escribe en el texto (se busca sin distinguir mayúsculas).
+  match     String
+  /// Cómo se escribe para que la voz la pronuncie bien.
+  say       String
+  /// Indicación de la que salió (si la propuso Opus).
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, match])
+}
+
+/// Estilo de guion (hito 6, ADR-072): cómo está armado un PDF o Word de guion, para no reescribirlo en cada
+/// importación. Biblioteca de cada usuario; cada proyecto recuerda el último usado.
+model ScriptStyle {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  ownerId   String   @db.Uuid
+  name      String
+  structure String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User      @relation(fields: [ownerId], references: [id])
+  projects Project[]
+
+  @@unique([ownerId, name])
+}
+
+enum DownloadBatchStatus {
+  queued
+  preparing
+  packing
+  ready
+  error
+}
+
+/// Lote de descargas (hito 7, ADR-087): la descarga individual de varios videos de un proyecto, con las mismas
+/// opciones, armada en segundo plano en un ZIP (un archivo por video) que se guarda 30 días.
+model DownloadBatch {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  ownerId        String              @db.Uuid
+  /// Sin FK: el lote sigue disponible aunque el proyecto se elimine.
+  projectId      String              @db.Uuid
+  projectName    String
+  /// html | single | mp4 | scorm12 | scorm2004 (los formatos de la descarga individual, sin el ZIP completo).
+  format         String
+  /// DownloadRequest (calidad, logo, ajustes, esquina).
+  request        Json
+  /// Ids de los videos, en el orden del lote.
+  videoIds       Json
+  status         DownloadBatchStatus @default(queued)
+  /// 0–1.
+  progress       Float               @default(0)
+  /// Videos ya preparados.
+  done           Int                 @default(0)
+  /// Videos que no entraron (sin final, más de 40 MB en un solo .html…): [{ id, title, reason }].
+  skipped        Json?
+  fileName       String
+  bytes          BigInt?
+  downloads      Int                 @default(0)
+  lastDownloadAt DateTime?
+  error          String?
+  createdAt      DateTime            @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  /// Cuándo se borra solo (30 días después de quedar listo; más si tiene un link vigente, T5; nulo con un link sin caducidad).
+  expiresAt      DateTime?
+  /// Lo que se armó (T5, ADR-111): { videos: { <id>: finalPath }, logo: versión del logo del proyecto | null }. Si cambia,
+  /// la fila queda «desactualizada» y se puede volver a armar con «Actualizar» (los links siguen igual).
+  snapshot       Json?
+
+  owner User           @relation(fields: [ownerId], references: [id])
+  links DownloadLink[]
+
+  @@index([status, createdAt])
+  @@index([ownerId, createdAt(sort: Desc)])
+}
+
+/// Archivo de medios ya subido al almacenamiento remoto (hito 8, ADR-093): la clave es la ruta remota
+/// (`wilox-motion/<entorno>/videos/<id>/…`). Si el archivo local tiene el mismo tamaño y fecha, está a salvo.
+model StoredObject {
+  key        String   @id
+  size       BigInt
+  /// Fecha de modificación (ms) del archivo local que se subió; al bajarlo se le pone la misma.
+  mtimeMs    Float
+  etag       String?
+  uploadedAt DateTime @default(now())
+}
+
+/// Carpeta de medios en la caché local del servidor (hito 8, ADR-093): `runs/<id>` o `downloads/<id>`.
+/// Se borra de la caché cuando lleva días sin usarse y todo está subido; se vuelve a bajar al usarla.
+model MediaDir {
+  dir        String    @id
+  lastUsedAt DateTime  @default(now())
+  /// Cuándo se quitó de la caché local (null = está en el disco).
+  evictedAt  DateTime?
+}
+
+/// Observación del cliente en el link de revisión del storyboard (hito 8, A4, ADR-098), o su aprobación
+/// (`kind = approval`, con las versiones de los fotogramas que aprobó).
+model ReviewComment {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  generationId    String
+  /// comment | approval
+  kind            String    @default("comment")
+  /// Fotograma (K0 = portada); nulo en una aprobación.
+  keyframeIndex   Int?
+  /// Versión del fotograma que vio el cliente.
+  keyframeVersion Int?
+  /// Aprobación: { "<índice>": versión } de todos los fotogramas.
+  versions        Json?
+  author          String
+  text            String
+  createdAt       DateTime  @default(now())
+  /// «En curso» (T8, ADR-119): el equipo ya la está corrigiendo. Se limpia al resolverla o volverla a pendiente.
+  inProgressAt    DateTime?
+  resolvedAt      DateTime?
+  /// «Archivada» (ADR-140): se guarda pero no cuenta como abierta ni se ve salvo que se pida.
+  archivedAt      DateTime?
+
+  generation Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@index([generationId, createdAt])
+  @@index([createdAt])
+}
+
+/// Publicación de un video en el prefijo público del almacenamiento (hito 9, ADR-101): una copia del final en una
+/// calidad (y, desde T2, con el logo dibujado) más sus subtítulos y su portada, en
+/// `wilox-motion/<entorno>/publico/<token>/`, con una URL estable que sirve CloudFront (código para Rise 360, SCORM
+/// liviano). Sigue al final vigente: si el video tiene un final nuevo, se vuelve a publicar con la misma URL.
+model Publication {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  /// 24 caracteres aleatorios (base64url): la carpeta pública, que no se puede adivinar.
+  token        String    @unique
+  ownerId      String    @db.Uuid
+  generationId String
+  /// Clave para reutilizar la misma publicación: calidad y logo ("720p_balanced|sin-logo").
+  variant      String
+  /// ExportQuality.
+  quality      Json
+  /// Logo dibujado en el video (T2): { sig, … }; nulo = sin logo dibujado.
+  logo         Json?
+  /// queued | preparing | ready | error
+  status       String    @default("queued")
+  error        String?
+  /// Final del que salió lo publicado: { finalPath, posterSec }. Si cambia, se vuelve a publicar.
+  source       Json?
+  /// Archivos publicados: { video, subtitles?, poster? } (nombres dentro de la carpeta).
+  files        Json?
+  bytes        BigInt?
+  /// Dónde se usa: ["manual", "rise", "scorm"] (aviso al despublicar).
+  uses         Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  publishedAt  DateTime?
+
+  generation Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, variant])
+  @@index([ownerId, createdAt(sort: Desc)])
+}
+
+/// Link de descarga para el cliente (hito 9, T5, ADR-111): una página pública `/api/descargar/<token>` que baja el archivo
+/// de una fila de «Descargas» sin sesión. Caduca (7 o 30 días) o no; se desactiva y cuenta las descargas.
+model DownloadLink {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  /// 24 caracteres aleatorios (base64url).
+  token          String    @unique
+  ownerId        String    @db.Uuid
+  batchId        String    @db.Uuid
+  /// Para quién es (opcional), p. ej. «Cliente X».
+  label          String?
+  createdAt      DateTime  @default(now())
+  /// Nulo = sin caducidad.
+  expiresAt      DateTime?
+  disabledAt     DateTime?
+  downloads      Int       @default(0)
+  lastDownloadAt DateTime?
+
+  batch DownloadBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+}
