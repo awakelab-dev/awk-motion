@@ -28,7 +28,8 @@
     "render:bench": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api render-bench",
     "storage:migrate": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api storage",
     "elevenlabs:purge": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api elevenlabs-purge",
-    "publications:restore": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api publications-restore"
+    "publications:restore": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api publications-restore",
+    "finales:cierre": "pnpm --filter @wilox/db build && pnpm --filter @wilox/api cierre"
   },
   "devDependencies": {
     "turbo": "^2.11.3",

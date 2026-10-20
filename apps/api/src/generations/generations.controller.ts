@@ -602,6 +602,16 @@ export class GenerationsController {
     return rec.state;
   }
 
+  /** Volver a unir el final de un video terminado, sin costo (ADR-158). */
+  @Post(':id/rejoin')
+  @HttpCode(202)
+  async rejoin(@Param('id') id: string, @Headers('x-confirm-change') confirm: string | undefined, @CurrentUser() user: AuthUser) {
+    await this.publications.guardVideo(id, user.id, confirm === '1'); // T3c: aviso si está publicado
+    const rec = await this.rec(id, user);
+    this.act(() => this.pipeline.rejoin(rec));
+    return rec.state;
+  }
+
   @Post(':id/approve')
   @HttpCode(202)
   async approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { FPS, type InsertState } from '@wilox/shared';
 import { buildCues, type Cue, type SubtitleWord } from '../delivery/subtitles.js';
-import type { PlannedClip } from './timeline.js';
+import { videoFrames, type PlannedClip } from './timeline.js';
 
 /**
  * Insertos (hito 6, ADR-073): clips fuera de la locución, generados entre dos clips (o en los extremos) o
@@ -128,13 +128,15 @@ export function cutSecFor(cues: Pick<Cue, 'start' | 'end'>[], boundarySec: numbe
 /** Composición del final con sus insertos (los listos y con frames). */
 export function compose(plan: PlannedClip[], voiceFrames: number, inserts: InsertState[], cues: Pick<Cue, 'start' | 'end'>[]): Composition {
   const voiceEnd = voiceFrames / FPS;
+  // El video sin insertos dura la voz o, si el último clip y su pausa van más allá, hasta ahí (ADR-157).
+  const base = videoFrames(plan, voiceFrames);
   const usable = inserts.filter((x) => x.status === 'ready' && insertFrames(x) > 0).sort((a, b) => a.after - b.after || a.id - b.id);
   const gaps: Gap[] = [];
   let added = 0;
   for (const ins of usable) {
     let g = gaps.find((x) => x.after === ins.after);
     if (!g) {
-      const b = boundaryFrame(plan, ins.after, voiceFrames);
+      const b = boundaryFrame(plan, ins.after, base);
       g = { after: ins.after, boundaryFrame: b, cutSec: cutSecFor(cues, b / FPS, ins.after, plan.length, voiceEnd), frames: 0, inserts: [] };
       gaps.push(g);
     }
@@ -143,7 +145,7 @@ export function compose(plan: PlannedClip[], voiceFrames: number, inserts: Inser
     g.frames += f;
     added += f;
   }
-  return { totalFrames: voiceFrames + added, gaps };
+  return { totalFrames: base + added, gaps };
 }
 
 /** Frames que se corre el clip `index` (1…n) por los insertos anteriores. */

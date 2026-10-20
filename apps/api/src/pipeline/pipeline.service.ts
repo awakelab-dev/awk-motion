@@ -111,7 +111,7 @@ import { clipShift, compose, finalCues, INSERT_VOICE_LEAD, TRANSITION_FRAMES, tr
 
 /** Segmento del final ya ubicado: frame de inicio en el final y, en los insertos, cuál es. */
 type FinalSegment = Segment & { finalStart: number; insert?: number; upload?: boolean };
-import { clipSegments, paragraphStarts, planShots, planTimeline, segmentsFor, totalFramesFor, type Segment } from './timeline.js';
+import { clipSegments, holdLastClip, paragraphStarts, planShots, planTimeline, segmentsFor, totalFramesFor, videoFrames, type Segment } from './timeline.js';
 import { clipSound, segmentKey, segmentReady, segmentStatus, soundKey, soundWav, writeSegmentKey } from './segments.js';
 import { buildCues, toSrt, toVtt } from '../delivery/subtitles.js';
 import { clipLoudness, modelSoundGainDb, remuxSegmentSound, renderModelSound, renderSilence } from '../media/sound.js';
@@ -2091,7 +2091,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
   private composition(rec: RunRecord): Composition {
     const s = rec.state;
     const voiceFrames = s.totalFrames ?? 0;
-    if (!s.inserts?.length || !rec.plan) return { totalFrames: voiceFrames, gaps: [] };
+    if (!s.inserts?.length || !rec.plan) return { totalFrames: videoFrames(rec.plan, voiceFrames), gaps: [] };
     const cues = rec.words?.length ? buildCues(s.paragraphs, rec.words, voiceFrames / FPS) : [];
     return compose(rec.plan, voiceFrames, s.inserts, cues);
   }
@@ -2594,6 +2594,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
   private async post(rec: RunRecord) {
     const s = rec.state;
     this.step(rec, 'post', 'Terminando el post de los clips (solo lo que falta)…');
+    this.holdEnd(rec);
     for (;;) {
       // Los insertos y los clips que se regeneran por su lado (ADR-091) se esperan para unir un solo final.
       await this.waitInserts(rec);
@@ -2613,6 +2614,25 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     }
     this.urgent.delete(rec);
     this.finish(rec);
+  }
+
+  /**
+   * Cierre del video (ADR-157): el último clip se ve entero y queda quieto END_HOLD antes de terminar, aunque la voz
+   * termine antes. Los planes nuevos ya lo traen (planTimeline); esto lo aplica a los de antes y con los frames que
+   * entregó el clip, en cada unión del final (también al rehacer la locución, cambiar la música o regenerar un clip).
+   */
+  private holdEnd(rec: RunRecord) {
+    const s = rec.state;
+    if (!rec.plan?.length) return;
+    const last = s.clips[s.clips.length - 1];
+    const held = holdLastClip(rec.plan, s.totalFrames ?? 0, last?.deliveredFrames ?? undefined);
+    if (held === rec.plan) return;
+    const end = held[held.length - 1].slotEndFrame;
+    rec.plan = held;
+    this.store.update(rec, () => {
+      if (last) last.slotEndFrame = end;
+    });
+    this.store.log(rec, `Cierre: el último clip se ve entero y queda ${(end - (s.totalFrames ?? 0)) > 0 ? `${((end - (s.totalFrames ?? 0)) / FPS).toFixed(2)} s después de la voz` : 'dentro de la voz'} (ADR-157).`);
   }
 
   /**
@@ -2687,13 +2707,11 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const s = rec.state;
     const got = s.finalFrames ?? 0;
     const want = this.composition(rec).totalFrames;
-    const extra = want - (s.totalFrames ?? 0);
-    if (got !== want) this.store.log(rec, `Atención: el final tiene ${got} frames y debía tener ${want}${extra ? ` (voz ${s.totalFrames} + insertos ${extra})` : ''}.`, 'warn');
-    this.step(
-      rec,
-      'done',
-      `Video listo: ${(got / FPS).toFixed(3)} s (${got} frames), ${extra ? `la locución más ${(extra / FPS).toFixed(1)} s de insertos` : 'igual que la locución'}.`,
-    );
+    const hold = videoFrames(rec.plan, s.totalFrames ?? 0) - (s.totalFrames ?? 0);
+    const extra = want - (s.totalFrames ?? 0) - hold;
+    if (got !== want) this.store.log(rec, `Atención: el final tiene ${got} frames y debía tener ${want}${extra || hold ? ` (voz ${s.totalFrames}${hold ? ` + cierre ${hold}` : ''}${extra ? ` + insertos ${extra}` : ''})` : ''}.`, 'warn');
+    const parts = [hold ? `${(hold / FPS).toFixed(1)} s de cierre tras la voz` : '', extra ? `${(extra / FPS).toFixed(1)} s de insertos` : ''].filter(Boolean);
+    this.step(rec, 'done', `Video listo: ${(got / FPS).toFixed(3)} s (${got} frames), ${parts.length ? `la locución más ${parts.join(' y ')}` : 'igual que la locución'}.`);
   }
 
   /**
@@ -2701,6 +2719,20 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
    * proveedores, y queda un final nuevo (final_vN.mp4). Si faltara algún segmento, se rehace el post
    * (SFX, normalización y congelados, también solo con ffmpeg).
    */
+  /**
+   * Volver a unir el final sin cambiar nada (ADR-158): para aplicar a un video terminado una corrección del montaje
+   * (p. ej. el cierre de ADR-157) sin costo. Solo ffmpeg: se rehacen los segmentos que cambian y queda un final_vN.mp4.
+   */
+  rejoin(rec: RunRecord) {
+    const s = rec.state;
+    if (rec.busy) throw new Error('La generación está trabajando.');
+    if (s.status !== 'done' || !rec.approved || !rec.plan) throw new Error('Solo se vuelve a unir un video terminado.');
+    this.store.log(rec, 'Volver a unir el final (solo ffmpeg, sin costo).');
+    this.guard(rec, async () => {
+      await this.post(rec);
+    });
+  }
+
   changeMusic(rec: RunRecord, track: string | null) {
     const s = rec.state;
     if (rec.busy) throw new Error('La generación está trabajando.');

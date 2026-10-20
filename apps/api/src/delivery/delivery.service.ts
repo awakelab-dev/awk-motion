@@ -31,7 +31,7 @@ import { DB } from '../db/db.module.js';
 import { ffmpeg } from '../media/ffmpeg.js';
 import { buildCues, toSrt, toVtt, type SubtitleWord } from './subtitles.js';
 import { clipShift, compose, finalCues, transitionFirst, transitionFrames } from '../pipeline/inserts.js';
-import type { PlannedClip } from '../pipeline/timeline.js';
+import { videoFrames, type PlannedClip } from '../pipeline/timeline.js';
 import { playerFiles, playerHtml, type PlayerCue, type PlayerOptions } from './player.js';
 import { scormManifest, type ScormItem, type ScormVersion } from './scorm.js';
 import { MediaService } from '../storage/media.service.js';
@@ -258,7 +258,7 @@ export class DeliveryService {
     const inserts = (g.inserts as unknown as InsertState[] | null) ?? [];
     const words = g.words as unknown as SubtitleWord[] | null;
     const voiceFrames = g.totalFrames ?? 0;
-    const comp = plan && inserts.length ? compose(plan, voiceFrames, inserts, words?.length ? buildCues(g.paragraphs, words, voiceFrames / FPS) : []) : { totalFrames: voiceFrames, gaps: [] };
+    const comp = plan && inserts.length ? compose(plan, voiceFrames, inserts, words?.length ? buildCues(g.paragraphs, words, voiceFrames / FPS) : []) : { totalFrames: videoFrames(plan, voiceFrames), gaps: [] };
     const out: DeliveryClip[] = g.clips.map((c) => {
       const d = clipShift(comp, c.index) / FPS;
       return { index: c.index, title: c.title, startSec: c.startFrame / FPS + d, endSec: c.slotEndFrame / FPS + d, posterSec: this.clipEndSec(c) + d };

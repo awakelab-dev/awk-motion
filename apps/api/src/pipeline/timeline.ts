@@ -11,6 +11,8 @@ export interface PlanInput {
   leadFrames?: number;
   /** Mínimo de frames de un clip para que valga la pena generarlo. */
   minFrames?: number;
+  /** Frames quietos tras la animación del último clip antes de terminar (ADR-157). */
+  endHoldFrames?: number;
 }
 
 export interface PlannedClip {
@@ -30,11 +32,35 @@ export interface Segment {
 }
 
 /**
+ * Cierre del video (ADR-157): la animación del último clip se ve entera y después queda quieta este tiempo antes de
+ * terminar. Si la voz termina antes, el video sigue (sin voz, con la música bajando) hasta ese punto.
+ */
+export const END_HOLD_SEC = 2;
+export const END_HOLD_FRAMES = Math.round(END_HOLD_SEC * FPS);
+
+/**
+ * El último clip con su animación entera y la pausa final: su hueco llega al menos hasta su inicio + lo que dura el
+ * clip + END_HOLD (nunca menos que el fin de la voz). Devuelve el mismo plan si ya cabe (idempotente).
+ */
+export function holdLastClip(plan: PlannedClip[], voiceFrames: number, lastClipFrames = CLIP_FRAMES, holdFrames = END_HOLD_FRAMES): PlannedClip[] {
+  const last = plan[plan.length - 1];
+  if (!last) return plan;
+  const end = Math.max(voiceFrames, last.startFrame + lastClipFrames + holdFrames);
+  if (last.slotEndFrame >= end) return plan;
+  return [...plan.slice(0, -1), { ...last, slotEndFrame: end }];
+}
+
+/** Frames del video antes de los insertos: la voz o, si el último clip y su pausa van más allá, hasta ahí (ADR-157). */
+export const videoFrames = (plan: Pick<PlannedClip, 'slotEndFrame'>[] | null | undefined, voiceFrames: number) =>
+  Math.max(voiceFrames, plan?.length ? plan[plan.length - 1].slotEndFrame : 0);
+
+/**
  * Plan de la línea de tiempo (docs/02, paso 4), determinista:
  * - el primer clip empieza en el frame 0;
  * - cada clip empieza LEAD frames antes de su PFC, o en el inicio del párrafo si la PFC lo abre;
  * - si pisa al anterior se desplaza hasta el fin del anterior;
- * - si ya no cabe un clip razonable antes del final, el shot se descarta.
+ * - si ya no cabe un clip razonable antes del final, el shot se descarta;
+ * - el último clip se ve entero y queda quieto END_HOLD antes de terminar, aunque la voz termine antes (ADR-157).
  */
 export function planTimeline(input: PlanInput): PlannedClip[] {
   const clipF = input.clipFrames ?? CLIP_FRAMES;
@@ -54,7 +80,7 @@ export function planTimeline(input: PlanInput): PlannedClip[] {
     out.push({ shot, startFrame: start, slotEndFrame: input.totalFrames });
   });
   for (let i = 0; i < out.length - 1; i++) out[i].slotEndFrame = out[i + 1].startFrame;
-  return out;
+  return holdLastClip(out, input.totalFrames, clipF, input.endHoldFrames ?? END_HOLD_FRAMES);
 }
 
 /**
