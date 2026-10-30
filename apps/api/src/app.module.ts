@@ -43,6 +43,7 @@ import { TrashController } from './trash/trash.controller.js';
 import { TrashService } from './trash/trash.service.js';
 import { DuplicateController } from './duplicate/duplicate.controller.js';
 import { DuplicateService } from './duplicate/duplicate.service.js';
+import { VideoOrderController } from './projects/video-order.controller.js';
 import { RevoiceBatchController } from './voice/revoice-batch.controller.js';
 import { RevoiceBatchService } from './voice/revoice-batch.service.js';
 import { VoiceTrialController } from './voice/voice-trial.controller.js';
@@ -56,7 +57,7 @@ import { BrandController } from './brand/brand.controller.js';
 
 @Module({
   imports: [DbModule, StorageModule, QueueModule, ProvidersModule],
-  controllers: [AppController, BrandController, AuthController, UsersController, ProjectsController, GenerationsController, ThemesController, MusicController, QueueController, PronunciationsController, ImportsController, DeliveryController, CostsController, ScriptStylesController, BatchesController, ReviewController, PublicationsController, TrashController, DuplicateController, DownloadLinksController, ProjectShareController, VoiceTrialController, RevoiceBatchController, AccessController],
+  controllers: [AppController, BrandController, AuthController, UsersController, ProjectsController, GenerationsController, ThemesController, MusicController, QueueController, PronunciationsController, ImportsController, DeliveryController, CostsController, ScriptStylesController, BatchesController, ReviewController, PublicationsController, TrashController, DuplicateController, VideoOrderController, DownloadLinksController, ProjectShareController, VoiceTrialController, RevoiceBatchController, AccessController],
   providers: [AccessService, OwnershipService, AuthService, JobsService, HistoryService, DownloadsService, { provide: APP_GUARD, useClass: AuthGuard }, RunStore, MusicService, PipelineService, ThemeStore, StudioService, TypographyService, DeliveryService, ExportsService, PackagesService, BatchesService, ReviewService, ClipAdviceService, PublicationsService, LogoBurnService, TrashService, DuplicateService, ProjectShareService, VoiceTrialService, RevoiceBatchService],
 })
 export class AppModule {}

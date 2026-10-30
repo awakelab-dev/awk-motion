@@ -23,6 +23,8 @@ import {
   Mic,
   Crown,
   Users,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { TRASH_RETENTION_DAYS, type AuthUser, type DuplicateProjectResponse, type GenerationSummary, type HistoryResponse, type HistoryStatus, type HistoryTotals, type ProjectsResponse, type ProjectSummary, type RunStatus, voiceTrialLabel } from '@wilox/shared';
@@ -418,6 +420,7 @@ function VideoCard({
   onMoved,
   onRemoved,
   onDuplicated,
+  order,
 }: {
   g: GenerationSummary;
   projects: ProjectSummary[];
@@ -427,6 +430,8 @@ function VideoCard({
   onMoved: (g: GenerationSummary) => void;
   onRemoved: (id: string) => void;
   onDuplicated: (g: GenerationSummary) => void;
+  /** Lugar en el proyecto y cambiarlo a mano, de a uno (ADR-162); sin el campo (con filtros), no se muestra. */
+  order?: { position: number; first: boolean; last: boolean; move: (direction: 'earlier' | 'later') => Promise<void> };
 }) {
   const [moving, setMoving] = useState(false);
   const [dup, setDup] = useState(false);
@@ -544,6 +549,31 @@ function VideoCard({
           {g.copyOf && (
             <span className="inline-flex items-center gap-1" title={`Duplicado de ${g.copyOf}`}>
               <Copy className="size-3" /> copia
+            </span>
+          )}
+          {order && (
+            <span className="ml-auto inline-flex items-center gap-0.5" title="Lugar del video en el proyecto">
+              <button
+                type="button"
+                disabled={order.first || moving}
+                onClick={() => void order.move('earlier').catch((e: Error) => setError(e.message))}
+                className="hover:text-foreground cursor-pointer rounded p-0.5 disabled:cursor-default disabled:opacity-30"
+                title="Mover antes"
+                aria-label="Mover antes"
+              >
+                <ChevronLeft className="size-3.5" />
+              </button>
+              <span className="min-w-5 text-center font-mono">{order.position}</span>
+              <button
+                type="button"
+                disabled={order.last || moving}
+                onClick={() => void order.move('later').catch((e: Error) => setError(e.message))}
+                className="hover:text-foreground cursor-pointer rounded p-0.5 disabled:cursor-default disabled:opacity-30"
+                title="Mover después"
+                aria-label="Mover después"
+              >
+                <ChevronRight className="size-3.5" />
+              </button>
             </span>
           )}
           {g.voiceTrial && (
@@ -911,10 +941,34 @@ function ProjectDetail({
     onChanged();
   };
 
-  /** Duplicado en este proyecto: aparece primero (el más nuevo); en otro, solo cambian los totales. */
+  /**
+   * Duplicado en este proyecto: va al final (los videos del proyecto van en secuencia, el más antiguo primero, ADR-160);
+   * si aún no está cargado el final de la lista, solo cambia el total. En otro proyecto, solo cambian los totales.
+   */
   const onDuplicated = (g: GenerationSummary) => {
-    if (g.projectId === project.id) setData((d) => (d ? { ...d, items: [g, ...d.items], total: d.total + 1 } : d));
+    if (g.projectId === project.id) setData((d) => (d ? { ...d, items: d.items.length >= d.total ? [...d.items, g] : d.items, total: d.total + 1 } : d));
     onChanged();
+  };
+
+  /**
+   * Cambiar el lugar de un video, de a uno (ADR-162): se intercambia con el de al lado; si el vecino no está cargado
+   * (más allá de «Cargar más»), se vuelve a pedir la lista.
+   */
+  const moveVideo = async (id: string, direction: 'earlier' | 'later') => {
+    const r = await api.moveVideo(id, direction);
+    if (!r.swappedWith) return;
+    setData((d) => {
+      if (!d) return d;
+      const i = d.items.findIndex((x) => x.id === id);
+      const j = d.items.findIndex((x) => x.id === r.swappedWith);
+      if (i < 0 || j < 0) {
+        setTick((t) => t + 1);
+        return d;
+      }
+      const items = [...d.items];
+      [items[i], items[j]] = [items[j], items[i]];
+      return { ...d, items };
+    });
   };
 
   /** Al mandarlo a la papelera, el video sale de esta lista. */
@@ -1007,8 +1061,18 @@ function ProjectDetail({
         </Card>
       )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {data?.items.map((g) => (
-          <VideoCard key={g.id} g={g} projects={projects} project={project} onOpen={onOpen} onMoved={onMoved} onRemoved={onRemoved} onDuplicated={onDuplicated} />
+        {data?.items.map((g, i) => (
+          <VideoCard
+            key={g.id}
+            g={g}
+            projects={projects}
+            project={project}
+            onOpen={onOpen}
+            onMoved={onMoved}
+            onRemoved={onRemoved}
+            onDuplicated={onDuplicated}
+            order={filtered ? undefined : { position: i + 1, first: i === 0, last: i === data.total - 1, move: (dir) => moveVideo(g.id, dir) }}
+          />
         ))}
       </div>
       {loading && (

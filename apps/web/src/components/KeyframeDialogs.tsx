@@ -1,6 +1,6 @@
 import { AudioLines, Loader2, Pause, Play, Wand2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { KeyframeState, RunState, VoiceSegment } from '@wilox/shared';
+import { PAUSE_MARGIN_SEC, PAUSE_MAX_SEC, PAUSE_MIN_SEC, type KeyframeState, type RunState, type VoiceSegment } from '@wilox/shared';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { Textarea } from '@/components/ui/textarea';
@@ -102,9 +102,13 @@ export function RevoiceDialog({ run, k, onClose }: { run: RunState; k: KeyframeS
   const [save, setSave] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
-  const [playing, setPlaying] = useState<'segment' | 'paragraph'>();
+  const [playing, setPlaying] = useState<'segment' | 'paragraph' | 'gap'>();
   const audio = useRef<HTMLAudioElement>(null);
   const stopAt = useRef<number>(0);
+  // Pausa entre dos palabras (ADR-164): la palabra después de la cual va la pausa y cuánto cambia.
+  const [gapAt, setGapAt] = useState<number>();
+  const [delta, setDelta] = useState('0.5');
+  const [pausing, setPausing] = useState(false);
 
   useEffect(() => {
     api.voiceSegment(run.id, k.index).then(
@@ -135,6 +139,41 @@ export function RevoiceDialog({ run, k, onClose }: { run: RunState; k: KeyframeS
     stopAt.current = to;
     a.currentTime = from;
     void a.play().then(() => setPlaying(what), () => setPlaying(undefined));
+  };
+
+  const allWords = seg?.paragraphs.flatMap((p) => p.words) ?? [];
+  const gapWord = allWords.find((w) => w.index === gapAt);
+  const nextWord = gapAt === undefined ? undefined : allWords.find((w) => w.index === gapAt + 1);
+  const maxShort = gapWord?.gapAfter !== undefined ? Math.max(0, Math.floor((gapWord.gapAfter - 2 * PAUSE_MARGIN_SEC) * 100) / 100) : 0;
+  const deltaNum = Number(delta.replace(',', '.'));
+  const deltaOk = Number.isFinite(deltaNum) && Math.abs(deltaNum) >= PAUSE_MIN_SEC && deltaNum <= PAUSE_MAX_SEC && -deltaNum <= maxShort + 1e-9;
+  const s2 = (n: number) => n.toFixed(2).replace('.', ',');
+
+  const playGap = () => {
+    const a = audio.current;
+    if (!a || !gapWord || gapWord.gapAfter === undefined) return;
+    if (playing === 'gap') {
+      a.pause();
+      setPlaying(undefined);
+      return;
+    }
+    const cut = gapWord.end + gapWord.gapAfter / 2;
+    stopAt.current = cut + 2;
+    a.currentTime = Math.max(0, cut - 2);
+    void a.play().then(() => setPlaying('gap'), () => setPlaying(undefined));
+  };
+
+  const applyPause = async () => {
+    if (gapAt === undefined || !deltaOk) return;
+    setPausing(true);
+    setErr(undefined);
+    try {
+      await api.wordPause(run.id, { afterWord: gapAt, deltaSec: deltaNum });
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+      setPausing(false);
+    }
   };
 
   const send = async () => {
@@ -219,14 +258,70 @@ export function RevoiceDialog({ run, k, onClose }: { run: RunState; k: KeyframeS
 
           {para && (
             <div className="rounded-lg border bg-background/40 p-3 text-sm leading-relaxed">
-              {para.words.map((w, i) => (
-                <span key={i} className={cn(w.inSegment && 'bg-primary/20 text-foreground rounded px-0.5')}>
-                  {w.word}{' '}
+              {para.words.map((w) => (
+                <span key={w.index}>
+                  <span className={cn(w.inSegment && 'bg-primary/20 text-foreground rounded px-0.5')}>{w.word}</span>
+                  {w.gapAfter !== undefined ? (
+                    <button
+                      type="button"
+                      onClick={() => setGapAt(gapAt === w.index ? undefined : w.index)}
+                      title={`Pausa: ${s2(w.gapAfter)} s · clic para cambiarla`}
+                      className={cn(
+                        'mx-0.5 inline-block h-3.5 w-1.5 cursor-pointer rounded-sm align-middle transition-colors',
+                        gapAt === w.index ? 'bg-primary' : 'bg-white/10 hover:bg-primary/60',
+                      )}
+                      aria-label={`Pausa después de «${w.word}»`}
+                    />
+                  ) : (
+                    ' '
+                  )}
                 </span>
               ))}
               <div className="text-muted-foreground mt-2 text-[11px]">
                 Resaltado: lo que se escucha en este fotograma · locución v{para.version}
-                {para.spokenText ? ` · la voz recibe: «${para.spokenText}»` : ''}
+                {para.spokenText ? ` · la voz recibe: «${para.spokenText}»` : ''} · Clic en el espacio entre dos palabras para cambiar esa pausa.
+              </div>
+            </div>
+          )}
+
+          {gapWord && gapWord.gapAfter !== undefined && (
+            <div className="grid gap-2 rounded-lg border p-3 text-xs">
+              <div className="font-medium">
+                Pausa entre «{gapWord.word}» y {nextWord ? `«${nextWord.word}»` : 'el párrafo siguiente'}: hoy {s2(gapWord.gapAfter)} s
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[-0.3, 0.3, 0.5, 1].filter((d) => d > 0 || -d <= maxShort).map((d) => (
+                  <Button key={d} size="sm" variant={deltaNum === d ? 'secondary' : 'ghost'} onClick={() => setDelta(String(d))}>
+                    {d > 0 ? '+' : '−'}
+                    {s2(Math.abs(d))} s
+                  </Button>
+                ))}
+                <label className="text-muted-foreground flex items-center gap-1">
+                  o
+                  <input
+                    value={delta}
+                    onChange={(e) => setDelta(e.target.value)}
+                    inputMode="decimal"
+                    className="bg-background/60 border-input h-8 w-16 rounded-md border px-2 text-xs"
+                    aria-label="Segundos (negativo para acortar)"
+                  />
+                  s
+                </label>
+                <Button size="sm" variant="ghost" onClick={playGap}>
+                  {playing === 'gap' ? <Pause /> : <Play />} Escuchar ahí
+                </Button>
+              </div>
+              <p className="text-muted-foreground">
+                {deltaOk
+                  ? `Queda en ${s2(gapWord.gapAfter + deltaNum)} s. `
+                  : `Entre ${maxShort >= PAUSE_MIN_SEC ? `−${s2(maxShort)}` : `+${s2(PAUSE_MIN_SEC)}`} y +${s2(PAUSE_MAX_SEC)} s. `}
+                Sin volver a pedir la voz ni costo: la locución se corta en el silencio entre las dos palabras y el resto queda idéntico, solo corrido; los
+                clips no cambian{done ? ' y se vuelve a unir el final' : ''}. El cliente solo necesita escuchar este punto.
+              </p>
+              <div>
+                <Button size="sm" onClick={() => void applyPause()} disabled={!deltaOk || pausing || busy}>
+                  {pausing ? <Loader2 className="animate-spin" /> : <AudioLines />} Cambiar la pausa
+                </Button>
               </div>
             </div>
           )}

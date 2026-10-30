@@ -544,10 +544,20 @@ export interface VoiceSegment {
     spokenText?: string;
     startSec: number;
     durationSec: number;
-    words: { word: string; start: number; end: number; inSegment: boolean }[];
+    /**
+     * `index`: índice de la palabra en toda la locución; `gapAfter`: silencio hasta la palabra siguiente (s), también
+     * si es la primera del párrafo siguiente; sin el campo, es la última de la locución (pausa entre palabras, ADR-164).
+     */
+    words: { word: string; start: number; end: number; inSegment: boolean; index: number; gapAfter?: number }[];
   }[];
   /** Reglas del usuario que aparecen en estos párrafos. */
   rules: PronunciationRuleInfo[];
+}
+
+/** Pausa entre dos palabras (ADR-164): después de la palabra `afterWord` (índice global), `deltaSec` más (o menos). */
+export interface PauseRequest {
+  afterWord: number;
+  deltaSec: number;
 }
 
 export interface RevoiceRequest {

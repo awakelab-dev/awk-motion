@@ -4,6 +4,7 @@ import type { AuthUser, GenerationSummary, HistoryQuery, HistoryResponse, Histor
 import { isBaseThemeId, UNCLASSIFIED_SYSTEM } from '@wilox/shared';
 import { BASE_THEMES } from '@wilox/styles';
 import { DB } from '../db/db.module.js';
+import { videoSequence } from './video-order.js';
 import { env } from '../config/env.js';
 import { AccessService } from '../access/access.service.js';
 import { fileUrlFor } from '../persistence/run-persistence.js';
@@ -138,12 +139,17 @@ export class HistoryService {
       where.id = { in: ranked };
     }
     // Sin la búsqueda de texto, los temas del filtro salen del conjunto sin el filtro de tema (para poder cambiarlo).
+    // Dentro de un proyecto, en secuencia: el que se creó primero va primero (hito 12, ADR-160); fuera, el más nuevo primero.
     const [list, forThemes] = await Promise.all([
-      this.db.generation.findMany({ where, select: LITE, orderBy: { createdAt: 'desc' } }),
+      this.db.generation.findMany({ where, select: LITE, orderBy: [{ createdAt: project ? 'asc' : 'desc' }, { id: project ? 'asc' : 'desc' }] }),
       this.db.generation.findMany({ where: { ...where, themeKey: undefined }, select: { themeKey: true, themeName: true } }),
     ]);
     if (ranked) {
       const pos = new Map(ranked.map((id, i) => [id, i]));
+      list.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+    } else if (project) {
+      // El orden del proyecto, que se cambia a mano (ADR-162).
+      const pos = new Map((await videoSequence(this.db, project)).map((id, i) => [id, i]));
       list.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
     }
     const jobs = await this.jobSums(list.map((g) => g.id));

@@ -20,3 +20,8 @@ export const OUTPUT_HEIGHT = 1440;
 
 export const framesToSeconds = (f: number) => f / FPS;
 export const secondsToFrame = (s: number) => Math.round(s * FPS);
+
+/** Pausa entre dos palabras (ADR-164): lo más que se agrega de una vez, lo mínimo que se cambia y el silencio que queda a cada lado al acortar (s). */
+export const PAUSE_MAX_SEC = 3;
+export const PAUSE_MIN_SEC = 0.05;
+export const PAUSE_MARGIN_SEC = 0.04;

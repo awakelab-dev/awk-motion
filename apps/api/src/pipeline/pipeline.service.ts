@@ -77,6 +77,7 @@ import {
   probeVideo,
   videoFrameAt,
   voiceWithGaps,
+  editSilence,
 } from '../media/ffmpeg.js';
 import { motionCurve, motionPeaks } from '../media/motion.js';
 import { planSfx, renderSfx } from '../media/sfx.js';
@@ -106,6 +107,7 @@ import {
 import { splitParagraphs, tokenize } from './text.js';
 import { nextTextFor, splitWholeVoice } from '../voice/voice-trial.js';
 import { pickSplitPoint, shiftIndexName, SPLIT_MIN_FRAMES, type SplitPoint } from './split.js';
+import { planPause } from './pause.js';
 import { renumberForSplit } from '../persistence/run-split.js';
 import { clipShift, compose, finalCues, INSERT_VOICE_LEAD, TRANSITION_FRAMES, transitionCut, transitionFirst, transitionFrames, transitionWindow, type Composition } from './inserts.js';
 
@@ -1134,7 +1136,13 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
         spokenText: p.spokenText,
         startSec: p.startSec,
         durationSec: p.durationSec,
-        words: rec.words!.filter((w) => w.paragraph === p.index).map((w) => ({ word: w.word, start: w.start, end: w.end, inSegment: w.end > fromSec && w.start < toSec })),
+        words: rec
+          .words!.map((w, i) => ({ w, i }))
+          .filter(({ w }) => w.paragraph === p.index)
+          .map(({ w, i }) => {
+            const next = rec.words![i + 1];
+            return { word: w.word, start: w.start, end: w.end, inSegment: w.end > fromSec && w.start < toSec, index: i, ...(next ? { gapAfter: Math.max(0, next.start - w.end) } : {}) };
+          }),
       }));
     const texts = paragraphs.map((p) => p.text).join(' ');
     return {
@@ -1674,6 +1682,107 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       await this.post(rec);
     } else if (before === 'awaiting_approval') {
       this.step(rec, 'awaiting_approval', 'Locución rehecha. Revisa los fotogramas y aprueba cuando estés conforme.');
+      this.reviewMessage(rec);
+    }
+  }
+
+  // ---------------------------------------------------------------- pausa entre dos palabras (hito 12, ADR-164)
+
+  /**
+   * Alarga (o acorta) el silencio después de la palabra `afterWord` sin volver a pedir la voz: la locución se corta en
+   * la mitad del silencio entre las dos palabras y ahí se agrega o se quita silencio. Lo de antes queda idéntico y lo de
+   * después igual pero corrido; los clips no se regeneran (el que está en pantalla queda un poco más en su último cuadro)
+   * y, si el video está terminado, se vuelve a unir el final. Sin costo.
+   */
+  addPause(rec: RunRecord, afterWord: number, deltaSec: number) {
+    const s = rec.state;
+    if (rec.busy) throw new Error('La generación está trabajando.');
+    const done = s.status === 'done' && rec.approved;
+    if (s.status !== 'awaiting_approval' && !done) throw new Error('La pausa se cambia durante la revisión de fotogramas o en un video terminado.');
+    if (s.keyframes.some((k) => k.status === 'generating' || k.activity)) throw new Error('Espera a que terminen las regeneraciones en curso.');
+    if (done && s.clips.some((c) => c.status === 'pending' || c.status === 'generating')) throw new Error('Espera a que terminen los clips que se están regenerando.');
+    if (!rec.words?.length || !rec.shots?.length || !rec.plan || !s.totalFrames) throw new Error('Faltan los tiempos o el plan de este video.');
+    // Se valida antes de encolar: el error llega a la app.
+    const plan = planPause(rec.words, s.paragraphs, afterWord, deltaSec);
+    this.guard(rec, async () => {
+      const before = s.status;
+      try {
+        await this.pauseInner(rec, afterWord, plan, before, done);
+      } catch (e) {
+        if (rec.state.status !== 'voice') throw e; // ya se aplicó: el error es del post o del render
+        const msg = (e as Error).message;
+        this.store.log(rec, `No se pudo cambiar la pausa: ${msg}`, 'warn');
+        this.store.update(rec, (st) => ((st.status = before), (st.message = `No se pudo cambiar la pausa: ${msg.split('\n')[0]}`)));
+      }
+    });
+  }
+
+  private async pauseInner(rec: RunRecord, afterWord: number, p: ReturnType<typeof planPause>, before: RunState['status'], done: boolean) {
+    const s = rec.state;
+    const words = rec.words!;
+    const a = words[afterWord].word;
+    const b = words[afterWord + 1].word;
+    const what = p.deltaSec > 0 ? `+${p.deltaSec.toFixed(2)} s` : `${p.deltaSec.toFixed(2)} s`;
+    this.step(rec, 'voice', `Pausa entre «${a}» y «${b}» (${what}), sin volver a pedir la voz…`);
+    const vdir = join(rec.dir, 'voice');
+    const last = p.paragraphs[p.paragraphs.length - 1];
+    const totalFrames = totalFramesFor(last.startSec + last.durationSec);
+    const shots = rec.shots!;
+    const plan = planShots(p.words, shots, p.paragraphs, totalFrames);
+    if (plan.length !== shots.length) throw new Error(`Con esa pausa no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó.`);
+
+    // El audio del párrafo (para que «Rehacer audio» por párrafo y el armado de la locución lo conserven) y la
+    // locución completa, editada en el mismo punto (lo demás, idéntico).
+    let paraVersion: number | undefined;
+    if (p.inParagraph) {
+      const para = s.paragraphs.find((x) => x.index === p.inParagraph!.index)!;
+      const src = join(vdir, (para.version ?? 1) > 1 ? `parrafo${nn(para.index + 1)}_v${para.version}.48k.wav` : `parrafo${nn(para.index + 1)}.48k.wav`);
+      if (existsSync(src)) {
+        paraVersion = Math.max(...s.paragraphs.map((x) => x.version ?? 1)) + 1;
+        await editSilence(src, p.inParagraph.atSec, p.deltaSec, join(vdir, `parrafo${nn(para.index + 1)}_v${paraVersion}.48k.wav`));
+      }
+    }
+    const voiceWav = join(vdir, 'voz_completa.wav');
+    const tmp = join(vdir, `voz_completa.pausa-${Date.now()}.wav`);
+    await editSilence(voiceWav, p.cutSec, p.deltaSec, tmp, totalFrames / FPS);
+    await rename(tmp, voiceWav);
+    this.media.dirty(rec.dir);
+
+    rec.words = p.words;
+    rec.plan = plan;
+    rec.paraAudio = undefined;
+    this.store.update(rec, (st) => {
+      st.paragraphs = st.paragraphs.map((x) => {
+        const n = p.paragraphs.find((y) => y.index === x.index)!;
+        return { ...x, startSec: n.startSec, durationSec: n.durationSec, ...(paraVersion && x.index === p.inParagraph?.index ? { version: paraVersion } : {}) };
+      });
+      st.totalFrames = totalFrames;
+      st.durationSec = totalFrames / FPS;
+      st.voiceUrl = this.fileUrl(rec, voiceWav, Date.now());
+      st.clips.forEach((c, i) => ((c.startFrame = plan[i].startFrame), (c.slotEndFrame = plan[i].slotEndFrame)));
+      st.finalUrl = undefined;
+      st.finalFrames = undefined;
+    });
+    // Registro de las pausas cambiadas (se agrega a lo anterior).
+    let history: unknown[] = [];
+    try {
+      history = JSON.parse(await readFile(join(rec.dir, 'prompts', 'pausas.json'), 'utf8')) as unknown[];
+    } catch {
+      // primera pausa
+    }
+    history.push({ at: new Date().toISOString(), afterWord, between: [a, b], deltaSec: p.deltaSec, cutSec: p.cutSec, gapBefore: p.gapBefore, gapAfter: p.gapAfter });
+    await this.savePrompt(rec, 'pausas.json', JSON.stringify(history, null, 1));
+    await this.savePrompt(rec, 'tiempos_por_palabra.json', JSON.stringify(p.words, null, 1));
+    await this.savePrompt(rec, 'plan.json', JSON.stringify(plan.map((pl, i) => ({ clip: `clip${nn(i + 1)}`, pfc: shots[i].pfc, layout: shots[i].keyframe.layout, ...pl })), null, 2));
+    this.store.log(
+      rec,
+      `Pausa entre «${a}» y «${b}» en ${p.cutSec.toFixed(2)} s: ${p.gapBefore.toFixed(2)} s → ${p.gapAfter.toFixed(2)} s (${what}); el video pasa a ${(totalFrames / FPS).toFixed(2)} s. Sin volver a pedir la voz.`,
+    );
+    if (done) {
+      this.step(rec, 'post', 'Pausa cambiada: se vuelve a unir el final (sin clips nuevos)…');
+      await this.post(rec);
+    } else if (before === 'awaiting_approval') {
+      this.step(rec, 'awaiting_approval', 'Pausa cambiada. Revisa los fotogramas y aprueba cuando estés conforme.');
       this.reviewMessage(rec);
     }
   }

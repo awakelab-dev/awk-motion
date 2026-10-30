@@ -544,6 +544,26 @@ export async function voiceWithGaps(voiceWav: string, gaps: { cutSec: number; ga
   await ffmpeg(['-i', voiceWav, '-filter_complex', parts.join(';'), '-map', '[out]', '-c:a', 'pcm_s16le', '-ar', '48000', output]);
 }
 
+/**
+ * Pausa entre dos palabras (ADR-164): en el segundo `atSec` agrega `deltaSec` de silencio (positivo) o quita ese tramo,
+ * centrado en `atSec` (negativo; debe ser silencio). Lo demás queda idéntico (sin recodificar con pérdida: PCM a PCM).
+ * Con `totalSec`, el resultado dura exactamente eso (se completa con silencio o se recorta el final).
+ */
+export async function editSilence(input: string, atSec: number, deltaSec: number, output: string, totalSec?: number) {
+  const fmt = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo';
+  const half = Math.abs(deltaSec) / 2;
+  const headEnd = deltaSec > 0 ? atSec : atSec - half;
+  const tailStart = deltaSec > 0 ? atSec : atSec + half;
+  const parts = [
+    `[0:a]${fmt},atrim=0:${headEnd.toFixed(6)},asetpts=N/SR/TB[h]`,
+    `[0:a]${fmt},atrim=start=${tailStart.toFixed(6)},asetpts=N/SR/TB[t]`,
+  ];
+  if (deltaSec > 0) parts.push(`aevalsrc=0|0:d=${deltaSec.toFixed(6)}:s=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[g]`);
+  const end = totalSec !== undefined ? `,apad,atrim=0:${totalSec.toFixed(6)}` : '';
+  parts.push(`${deltaSec > 0 ? '[h][g][t]' : '[h][t]'}concat=n=${deltaSec > 0 ? 3 : 2}:v=0:a=1${end}[out]`);
+  await ffmpeg(['-i', input, '-filter_complex', parts.join(';'), '-map', '[out]', '-c:a', 'pcm_s16le', '-ar', '48000', output]);
+}
+
 /** Un cuadro de un video en el segundo `sec`, ajustado a 2560×1440 como en el final (PNG). */
 export async function videoFrameAt(input: string, sec: number, fit: 'contain' | 'cover' | 'stretch', output: string) {
   await ffmpeg(['-ss', Math.max(0, sec).toFixed(3), '-i', input, '-vf', fitFilter(fit), '-frames:v', '1', '-update', '1', output]);

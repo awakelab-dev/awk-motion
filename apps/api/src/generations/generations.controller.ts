@@ -46,6 +46,9 @@ import { PublicationsService } from '../publications/publications.service.js';
 import { TrashService } from '../trash/trash.service.js';
 import { AccessService } from '../access/access.service.js';
 import { splitParagraphs } from '../pipeline/text.js';
+import { sendToEnd } from '../projects/video-order.js';
+
+const PauseSchema = z.object({ afterWord: z.number().int().min(0), deltaSec: z.number().min(-10).max(10) });
 
 const CreateSchema = z.object({
   text: z.string().trim().min(20, 'El texto es demasiado corto.').max(20_000, 'El texto es demasiado largo para un solo video.'),
@@ -433,6 +436,18 @@ export class GenerationsController {
     return rec.state;
   }
 
+  /** Pausa entre dos palabras (ADR-164): alargar o acortar el silencio sin volver a pedir la voz; sin costo. */
+  @Post(':id/word-pause')
+  @HttpCode(202)
+  async wordPause(@Param('id') id: string, @Headers('x-confirm-change') confirm: string | undefined, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    await this.publications.guardVideo(id, user.id, confirm === '1'); // T3c: aviso si está publicado
+    const r = PauseSchema.safeParse(body ?? {});
+    if (!r.success) throw new BadRequestException('Pausa no válida.');
+    const rec = await this.rec(id, user);
+    this.act(() => this.pipeline.addPause(rec, r.data.afterWord, r.data.deltaSec));
+    return rec.state;
+  }
+
   /** «Rehacer la locución» (ADR-134): toda la locución en un solo pedido, con la misma voz; sin clips nuevos. */
   @Post(':id/revoice-all')
   @HttpCode(202)
@@ -467,9 +482,12 @@ export class GenerationsController {
     // T3c (ADR-105): el video toma el logo del proyecto nuevo; se confirma siempre.
     const hasLogo = !!(target.delivery as { logo?: unknown } | null)?.logo;
     await this.publications.guardMove(id, user.id, { id: target.id, name: target.name, hasLogo }, confirm === '1');
+    const moved = rec.projectId !== projectId;
     rec.projectId = projectId;
     this.store.update(rec, (s) => (s.projectId = projectId));
     await this.store.flush(rec);
+    // En el proyecto nuevo queda al final (ADR-162).
+    if (moved) await sendToEnd(this.db, id);
     this.access.forget(); // el video cambió de proyecto: su acceso también
     const [s] = await this.history.summaries([id]);
     return s;

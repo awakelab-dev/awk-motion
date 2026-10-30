@@ -1,5 +1,5 @@
-import { AlertTriangle, AudioLines, Check, ChevronDown, ChevronRight, Film, ImageIcon, Loader2, MessageSquare, RefreshCw, RotateCcw, Scissors, Sparkles, Undo2, Wand2, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, AudioLines, Captions, Check, ChevronDown, ChevronRight, Film, ImageIcon, Loader2, MessageSquare, Play, RefreshCw, Repeat, RotateCcw, Scissors, Sparkles, Undo2, Wand2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipAdvice, ClipSplitInfo, ClipFeedback, ClipLogo, ClipSoundMode, ClipState, KeyframeState, RunState, VideoDelivery } from '@wilox/shared';
 import { clipSoundTitle, soundOf } from '@/components/SoundPicker';
@@ -12,6 +12,7 @@ import { api, reviewApi } from '@/lib/api';
 import { REVIEWS_CHANGED_EVENT } from '@/lib/clip-open';
 import { confirmSpend, useCostText } from '@/lib/spend';
 import { cn } from '@/lib/utils';
+import { CaptionOverlay, useVttCues } from '@/lib/captions';
 
 const FPS = 24;
 
@@ -47,6 +48,10 @@ export function ClipEditor({
   const anyWorking = run.keyframes.some((k) => k.status === 'generating' || k.activity);
   const logoHere = delivery ? (delivery.clipCorners[String(c.index)] ?? delivery.settings.corner) : undefined;
   const [zoom, setZoom] = useState<{ url?: string; label: string }>();
+  // Ver el clip dentro del video final, como lo ve el cliente (ADR-165): por defecto, si el video tiene final.
+  const inFinal = delivery?.clips.find((x) => x.index === c.index);
+  const [view, setView] = useState<'video' | 'clip'>();
+  const shown = view ?? (run.finalUrl && inFinal ? 'video' : 'clip');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
@@ -85,6 +90,28 @@ export function ClipEditor({
     >
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         <div className="grid min-w-0 content-start gap-3">
+          {run.finalUrl && inFinal && (
+            <div className="flex gap-1 text-xs">
+              {(
+                [
+                  ['video', 'En el video (como lo ve el cliente)'],
+                  ['clip', 'Solo el clip'],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setView(v)}
+                  className={cn('cursor-pointer rounded-md border px-2.5 py-1', shown === v ? 'border-primary bg-primary/10' : 'hover:border-white/20')}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {shown === 'video' && run.finalUrl && inFinal && delivery ? (
+            <FinalAtClip run={run} c={c} delivery={delivery} />
+          ) : (
           <div className="relative overflow-hidden rounded-lg border bg-black [container-type:inline-size]">
             {c.url && c.status === 'ready' ? (
               <>
@@ -103,9 +130,10 @@ export function ClipEditor({
               </div>
             )}
           </div>
+          )}
           <div className="text-muted-foreground flex flex-wrap gap-x-3 font-mono text-[11px]">
             <span>
-              {(c.startFrame / FPS).toFixed(2)}–{(c.slotEndFrame / FPS).toFixed(2)} s del final
+              {(inFinal?.startSec ?? c.startFrame / FPS).toFixed(2)}–{(inFinal?.endSec ?? c.slotEndFrame / FPS).toFixed(2)} s del final
             </span>
             {c.ssimEnd !== undefined && (
               <span>
@@ -153,8 +181,8 @@ export function ClipEditor({
             <section className="grid gap-2">
               <div className="font-medium">Locución del tramo</div>
               <div>
-                <Button size="sm" variant="outline" onClick={() => onRevoice(kEnd)} disabled={anyWorking} title="Escuchar y rehacer la locución de este tramo">
-                  <AudioLines /> Rehacer audio
+                <Button size="sm" variant="outline" onClick={() => onRevoice(kEnd)} disabled={anyWorking} title="Escuchar la locución de este tramo, cambiar una pausa entre dos palabras (sin costo) o rehacerla">
+                  <AudioLines /> Rehacer audio o pausa
                 </Button>
               </div>
             </section>
@@ -206,6 +234,71 @@ export function ClipEditor({
  * Fotograma de un clip (ADR-071): versión vigente o propuesta. Con el video terminado se regenera aquí mismo
  * (con indicación o con la sugerencia de Opus); la imagen nueva queda como propuesta hasta «Aplicar».
  */
+/** Antes del clip se ve un poco del anterior, para oír cómo entra (s). */
+const PREROLL_SEC = 1;
+
+/**
+ * El video final con el logo de cada tramo y los subtítulos, como lo ve el cliente, empezando en este clip (ADR-165):
+ * así se escucha la locución y se ve la sincronía sin abrir el video en otra pestaña ni adelantarlo a mano. «Repetir el
+ * clip» lo vuelve a su inicio al terminar su tramo.
+ */
+function FinalAtClip({ run, c, delivery }: { run: RunState; c: ClipState; delivery: VideoDelivery }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const range = delivery.clips.find((x) => x.index === c.index)!;
+  const from = Math.max(0, range.startSec - PREROLL_SEC);
+  const [t, setT] = useState(from);
+  const [loop, setLoop] = useState(false);
+  const [captions, setCaptions] = useState(false);
+  const cues = useVttCues(captions ? api.subtitlesUrl(run.id, 'vtt', run.finalUrl) : undefined);
+  // El logo del tramo que se está viendo (cada clip o inserto tiene su esquina, o ninguna).
+  const here = delivery.clips.find((x) => t >= x.startSec && t < x.endSec);
+  const corner = here ? (delivery.clipCorners[String(here.index)] ?? delivery.settings.corner) : delivery.settings.corner;
+  const start = (play: boolean) => {
+    const v = video.current;
+    if (!v) return;
+    v.currentTime = from;
+    if (play) void v.play().catch(() => undefined);
+  };
+  return (
+    <div className="grid gap-1.5">
+      <div className="relative overflow-hidden rounded-lg border bg-black [container-type:inline-size]">
+        <video
+          ref={video}
+          key={run.finalUrl}
+          src={run.finalUrl}
+          controls
+          playsInline
+          preload="auto"
+          className="aspect-video w-full"
+          onLoadedMetadata={() => start(true)}
+          onTimeUpdate={(e) => {
+            const now = e.currentTarget.currentTime;
+            setT(now);
+            if (loop && now >= range.endSec) start(true);
+          }}
+        />
+        {corner !== 'none' && <LogoOverlay src={delivery.logo?.url} aspect={aspectOf(delivery)} settings={delivery.settings} corner={corner} />}
+        <CaptionOverlay video={video} cues={cues} on={captions} />
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <Button size="sm" variant="outline" onClick={() => start(true)} title={`Desde ${PREROLL_SEC} s antes del clip`}>
+          <Play /> Desde el clip
+        </Button>
+        <Button size="sm" variant={loop ? 'default' : 'ghost'} onClick={() => setLoop((v) => !v)} title="Al terminar el tramo del clip, vuelve a su inicio">
+          <Repeat /> Repetir el clip
+        </Button>
+        <Button size="sm" variant={captions ? 'default' : 'ghost'} onClick={() => setCaptions((v) => !v)}>
+          <Captions /> Subtítulos
+        </Button>
+        <span className="text-muted-foreground font-mono text-[11px]">
+          {t.toFixed(1)} s · clip {range.startSec.toFixed(1)}–{range.endSec.toFixed(1)} s
+          {t >= range.startSec && t < range.endSec ? ' · ahora en este clip' : ''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function FrameCard({ run, k, label, editable, onZoom }: { run: RunState; k?: KeyframeState; label: string; editable: boolean; onZoom: (k: { url?: string; label: string }) => void }) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');

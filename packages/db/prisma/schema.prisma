@@ -313,6 +313,9 @@ model Generation {
   deletedAt          DateTime?
   /// Duplicado de este video (hito 9, T3e, ADR-107): copia sin costo; sin FK (el original puede eliminarse).
   copyOfId           String?
+  /// Orden dentro del proyecto (hito 12, ADR-162): de menor a mayor. Nace con la hora de creación (segundos) y se
+  /// cambia a mano, de a un lugar («antes» / «después»). Se lee y se escribe por SQL (videoSequence, moveVideo).
+  sortKey            Float    @default(dbgenerated("date_part('epoch'::text, now())"))
 
   owner      User            @relation(fields: [ownerId], references: [id])
   theme      Theme?          @relation(fields: [themeId], references: [id], onDelete: SetNull)
@@ -333,6 +336,7 @@ model Generation {
   @@index([ownerId, themeKey])
   @@index([ownerId, trashedAt])
   @@index([projectId])
+  @@index([projectId, sortKey])
   @@index([parentId])
   @@index([searchVector], type: Gin)
 }

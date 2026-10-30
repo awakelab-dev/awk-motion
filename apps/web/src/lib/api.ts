@@ -31,6 +31,7 @@ import type {
   ImportResult,
   PronunciationRuleInfo,
   RevoiceRequest,
+  PauseRequest,
   VoiceSegment,
   TypefaceRole,
   ProjectsResponse,
@@ -201,6 +202,8 @@ export const api = {
   trashVideo: (id: string) => req<{ ok: true }>(`/generations/${id}`, { method: 'DELETE' }),
   /** Duplicar un video (T3e, ADR-107), en su proyecto o en otro: sin costo; toma el logo del proyecto donde queda. */
   duplicate: (id: string, projectId?: string) => req<GenerationSummary>(`/generations/${id}/duplicate`, { method: 'POST', body: JSON.stringify({ projectId }) }),
+  /** Cambiar a mano el lugar de un video en su proyecto, de a uno (hito 12, ADR-162). */
+  moveVideo: (id: string, direction: 'earlier' | 'later') => req<{ swappedWith: string | null }>(`/generations/${id}/order`, { method: 'POST', body: JSON.stringify({ direction }) }),
   /** «Rehacer la locución» en un solo pedido (hito 10, ADR-134). */
   revoiceAll: (id: string) => req<RunState>(`/generations/${id}/revoice-all`, { method: 'POST' }),
   /** «Dividir en dos» (hito 10, T3, ADR-130). */
@@ -230,6 +233,8 @@ export const api = {
   importDocument: (body: ImportRequest) => req<ImportResult>('/imports', { method: 'POST', body: JSON.stringify(body) }),
   /** Rehacer audio (hito 5): tramo de locución de Ki y nueva locución de un párrafo. */
   voiceSegment: (id: string, clipIndex: number) => req<VoiceSegment>(`/generations/${id}/clips/${clipIndex}/voice`),
+  /** Pausa entre dos palabras sin volver a pedir la voz (ADR-164). */
+  wordPause: (id: string, body: PauseRequest) => req<RunState>(`/generations/${id}/word-pause`, { method: 'POST', body: JSON.stringify(body) }),
   revoice: (id: string, paragraph: number, body: RevoiceRequest) =>
     req<RunState>(`/generations/${id}/paragraphs/${paragraph}/revoice`, { method: 'POST', body: JSON.stringify(body) }),
   /** Cambiar la música de un video terminado: solo se vuelve a renderizar. */
