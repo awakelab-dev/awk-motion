@@ -1,6 +1,7 @@
-# Despliegue en el servidor · instalación de Awakelab (motion.wiloxagency.com)
+# Despliegue en el servidor · instalación de Awakelab (motion.awakelab.world)
 
 > Desde el hito 12 esta instalación es **Awakelab** y sigue la rama `awakelab` (`git pull` en el servidor baja esa rama).
+> Desde el hito 13 su dominio es **`motion.awakelab.world`**. Durante la transición responde también en `motion.wiloxagency.com`, para los links ya enviados (sección 8).
 
 Primer despliegue: 07-10-2026. Desde esa fecha, **los datos reales (BD y `storage/`) viven en el servidor**. El Mac queda para desarrollo; lo que se genere allí no pasa al servidor.
 
@@ -13,7 +14,7 @@ Primer despliegue: 07-10-2026. Desde esa fecha, **los datos reales (BD y `storag
 | Marca | `BRAND=awakelab` en el `.env` (ADR-150): sin esa línea la API no arranca, porque usa `wilox-motion/prod/` (ADR-151). |
 | Node | 24.21.0 con nvm, **solo para Wilox**. El `default` de nvm sigue en 20, que es el que usan PM2 y las demás apps. pnpm 10.34.5 vía corepack. |
 | API | Proceso PM2 `wilox-motion-api` → `apps/api/dist/main.js`, con cwd `apps/api` y puerto **3040** (el 3001 lo usa `video-manager-api`). Corre con `nice -n 10`, y ffmpeg hereda esa prioridad baja. |
-| Web | Estáticos de `apps/web/dist` servidos por nginx; `/api/` hace de proxy a `127.0.0.1:3040`. Sitio: `/etc/nginx/sites-available/motion.wiloxagency.com`. HTTPS con certbot, con renovación automática. |
+| Web | Estáticos de `apps/web/dist` servidos por nginx; `/api/` hace de proxy a `127.0.0.1:3040`. Sitio: `/etc/nginx/sites-available/motion.awakelab.world` (y, solo durante la transición, `motion.wiloxagency.com`, sección 8). HTTPS con certbot, con renovación automática. |
 | BD | PostgreSQL 18.6 gestionado de Lightsail, `awk-epica` (Paris), compartido con Épica. Base `wilox`, usuario `wilox` (dueño de la base) y extensión `unaccent`. La clave está en el gestor de contraseñas, **nunca en el repo**. |
 | Endpoint de la BD | `ls-683fa66f22db41568a9b96f947bf54152764f008.cda4040msrzs.eu-west-3.rds.amazonaws.com:5432` |
 | TLS de la BD | El driver `pg` verifica el certificado, así que la API arranca con `NODE_EXTRA_CA_CERTS=/home/ubuntu/.wilox/rds-global-bundle.pem`, guardado en la configuración de PM2. |
@@ -27,7 +28,8 @@ Es el `.env` del Mac con estos cambios:
 ```
 GENERATION_MODE=api
 PORT=3040
-WEB_ORIGIN=https://motion.wiloxagency.com
+WEB_ORIGIN=https://motion.awakelab.world
+WEB_ORIGIN_ALIASES=https://motion.wiloxagency.com
 STORAGE_DIR=/projects/wilox-motion/storage
 COOKIE_SECURE=true
 FFMPEG_PATH=/usr/bin/ffmpeg
@@ -35,6 +37,8 @@ FFPROBE_PATH=/usr/bin/ffprobe
 QUEUE_FFMPEG_CONCURRENCY=1
 DATABASE_URL=postgresql://wilox:<CLAVE>@<ENDPOINT>:5432/wilox?sslmode=require
 ```
+
+`WEB_ORIGIN` es el dominio con que salen los links nuevos; `WEB_ORIGIN_ALIASES` (ADR-151), los otros dominios que aceptan peticiones de la web y de los links (solo durante la transición, sección 8).
 
 Al arrancar, `pg` muestra un `SECURITY WARNING` sobre `sslmode`. Es solo informativo: hoy `require` equivale a `verify-full`, y se deja así porque el CLI de Prisma no acepta `verify-full`.
 
@@ -50,7 +54,7 @@ cd ~/projects/wilox-motion && git push origin awakelab && bash scripts/exportar-
 Qué debe salir: el primer `push` sin error, `Exportado: <commit>` (o `Sin cambios`) y el segundo `push` sin error.
 
 ### Paso 2 · Mirar la cola
-Dónde: navegador → `https://motion.wiloxagency.com` → **Cola**.
+Dónde: navegador → `https://motion.awakelab.world` → **Cola**.
 Lo ideal es reiniciar sin trabajos en marcha. Si los hay, también es seguro: la API espera hasta 90 s (`SHUTDOWN_GRACE_SEC`) y, al volver, la cola retoma lo pendiente sin pagar dos veces (los clips de MiniMax no se pierden). Lo único que se repite es un render de ffmpeg que estuviera a medias.
 
 ### Paso 3 · Bajar, instalar y compilar
@@ -78,12 +82,12 @@ Qué debe salir: el tamaño de la copia y `All migrations have been successfully
 ### Paso 6 · Reiniciar la API
 Dónde: SSH en el servidor. Usa siempre el Node `default` (ahí está instalado PM2) y pasa siempre `NODE_EXTRA_CA_CERTS`.
 ```bash
-source ~/.nvm/nvm.sh && nvm use default >/dev/null && NODE_EXTRA_CA_CERTS=$HOME/.wilox/rds-global-bundle.pem pm2 restart wilox-motion-api --update-env && sleep 10 && pm2 save && pm2 describe wilox-motion-api | grep -E "status|restarts" && curl -s -o /dev/null -w "público %{http_code}\n" https://motion.wiloxagency.com/api/auth/me
+source ~/.nvm/nvm.sh && nvm use default >/dev/null && NODE_EXTRA_CA_CERTS=$HOME/.wilox/rds-global-bundle.pem pm2 restart wilox-motion-api --update-env && sleep 10 && pm2 save && pm2 describe wilox-motion-api | grep -E "status|restarts" && curl -s -o /dev/null -w "público %{http_code}\n" https://motion.awakelab.world/api/auth/me
 ```
 Qué debe salir: `online`, un contador de `restarts` que no sigue subiendo y `público 401`.
 
 ### Paso 7 · Comprobar en el navegador
-Recarga forzada (Cmd+Shift+R) en `https://motion.wiloxagency.com`. Entra, abre un proyecto y reproduce un video.
+Recarga forzada (Cmd+Shift+R) en `https://motion.awakelab.world`. Entra, abre un proyecto y reproduce un video.
 
 ## 3. Cambiar una variable del `.env`
 
@@ -146,12 +150,12 @@ source ~/.nvm/nvm.sh && nvm use default >/dev/null && cd /projects/wilox-motion/
 ```
 Si cambia la versión de Node 24, actualiza la ruta de `--interpreter-args`: borra el proceso (`pm2 delete wilox-motion-api`) y vuelve a crearlo con este comando.
 
-**4.10 nginx y HTTPS.** Contenido de `/etc/nginx/sites-available/motion.wiloxagency.com` antes de certbot:
+**4.10 nginx y HTTPS.** Contenido de `/etc/nginx/sites-available/motion.awakelab.world` antes de certbot:
 ```nginx
 server {
     listen 80;
     listen [::]:80;
-    server_name motion.wiloxagency.com;
+    server_name motion.awakelab.world;
 
     root /projects/wilox-motion/apps/web/dist;
     index index.html;
@@ -176,7 +180,7 @@ server {
 }
 ```
 ```bash
-sudo ln -sf /etc/nginx/sites-available/motion.wiloxagency.com /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx && sudo certbot --nginx -d motion.wiloxagency.com --redirect
+sudo ln -sf /etc/nginx/sites-available/motion.awakelab.world /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx && sudo certbot --nginx -d motion.awakelab.world --redirect
 ```
 
 ## 4b. Medios en S3 (hito 8, ADR-093 y ADR-096)
@@ -232,3 +236,25 @@ La clave de ElevenLabs (`ELEVENLABS_API_KEY`) necesita, además de Text to Speec
 Para limpiar el historial **de una voz** (de Wilox y lo hecho a mano en la web), conservando las N locuciones más recientes (hito 10, ADR-128): `NODE_EXTRA_CA_CERTS=$HOME/.wilox/rds-global-bundle.pem pnpm elevenlabs:purge --voz "Karla Chilena" --conservar 40` (solo lista) y lo mismo con `--borrar`. Si la voz ya no está entre las voces de la cuenta, el comando lista los `voice_id` del historial para pasarlo con `--voz <voice_id>`.
 
 Prueba de voz (hito 10, ADR-129): la variante «pedidos enlazados» usa `ELEVENLABS_V4_MODEL` (por defecto `eleven_v4`; no hace falta ponerlo en el `.env` salvo que ElevenLabs le cambie el nombre).
+
+## 8. Dominio: `motion.awakelab.world` y la transición desde `motion.wiloxagency.com`
+
+Paso hecho en el hito 13 (ADR-168), con el DNS de `motion.awakelab.world` ya apuntando al servidor (13.38.161.213).
+
+**Cómo queda durante la transición** (al menos 15 días desde el cambio; termina cuando Leonardo avisa):
+- `motion.awakelab.world`: el sitio de nginx `motion.awakelab.world` (el bloque de 4.10), con su certificado. Es el dominio de la instalación: `WEB_ORIGIN=https://motion.awakelab.world`, así que **todos los links que se copian desde la app** (revisión del storyboard y de los videos, «Compartir», links de descarga) salen con él, también los de links creados antes.
+- `motion.wiloxagency.com`: el sitio de siempre, sin cambios, hacia el mismo puerto 3040. Sirve los links que ya se enviaron con ese dominio. `WEB_ORIGIN_ALIASES=https://motion.wiloxagency.com` hace que la API acepte las peticiones que llegan desde él (observaciones y aprobaciones del cliente, inicio de sesión); sin esa línea darían 403.
+- La sesión es de cada dominio: quien entra en `motion.awakelab.world` inicia sesión una vez más.
+- Lo publicado (código de Rise 360, SCORM liviano) no cambia: lo sirve `media.awakelab.world`.
+
+**Cambiar al dominio nuevo** (por SSH en el servidor, en este orden):
+1. Comprobar el DNS: `dig +short motion.awakelab.world` → `13.38.161.213`.
+2. Sitio nuevo: copiar el de siempre cambiando solo `server_name` y sin las líneas que añadió certbot, activarlo y pedir el certificado: `sudo certbot --nginx -d motion.awakelab.world --redirect`.
+3. `.env`: `WEB_ORIGIN=https://motion.awakelab.world` y `WEB_ORIGIN_ALIASES=https://motion.wiloxagency.com`; después, el paso 6 (reiniciar la API).
+4. Comprobar los dos dominios: `curl -s -o /dev/null -w "%{http_code}\n" https://<dominio>/api/auth/me` → `401` en los dos, y un link de revisión viejo que abre y acepta una observación.
+
+**Dar de baja `motion.wiloxagency.com` al terminar la transición.** Antes, tener en cuenta que dejan de abrir **todos** los links con ese dominio: los de revisión, los de descarga (también los sin caducidad) y los de «Compartir» (`/api/ver/…`). Si alguno de esos se usa en un LMS o se mandó a un cliente, hay que enviarle el link con `motion.awakelab.world` (el mismo token sirve: solo cambia el dominio). Por SSH en el servidor:
+1. Quitar el alias del `.env`: borrar la línea `WEB_ORIGIN_ALIASES=https://motion.wiloxagency.com` y hacer el paso 6.
+2. Desactivar el sitio: `sudo rm /etc/nginx/sites-enabled/motion.wiloxagency.com && sudo nginx -t && sudo systemctl reload nginx` (el archivo de `sites-available` queda como respaldo).
+3. Borrar su certificado, para que certbot no intente renovarlo: `sudo certbot delete --cert-name motion.wiloxagency.com`.
+4. Comprobar: `curl -s -o /dev/null -w "%{http_code}\n" https://motion.awakelab.world/api/auth/me` → `401`. El registro DNS de `motion.wiloxagency.com` se borra (o se reutiliza) en el proveedor del dominio.
