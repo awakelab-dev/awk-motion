@@ -190,14 +190,22 @@ export function reviseShotUserPrompt(opts: {
   previousSummary: string;
   nextSummary?: string;
   change: string;
+  /** Imágenes de referencia del editor que van adjuntas (hito 13, ADR-170). */
+  editorRefs?: number;
 }): string {
+  // Sin imágenes, el texto de siempre.
+  const refs = opts.editorRefs
+    ? `
+
+EDITOR REFERENCE IMAGES: the director attached ${opts.editorRefs === 1 ? '1 image (below), "editor reference image 1"' : `${opts.editorRefs} images (below), numbered in order: "editor reference image 1" to "editor reference image ${opts.editorRefs}"`}. The requested change says what to do with them (put one inside a specific media frame, replace an element with it, or create new imagery based on it). Look at them and write the shot so the image generator knows exactly where each one goes and what it shows: name it as "editor reference image N" plus a short description of its content in the scene and, when it fills a media frame, in that frame's subject (a frame holding a reference image is a still photo unless the director asks otherwise). Keep everything else of the shot unless the change requires it.`
+    : '';
   return `CURRENT SHOT:
 ${JSON.stringify(opts.shot, null, 1)}
 
 PREVIOUS KEYFRAME (start of this clip): ${opts.previousSummary}
 ${opts.nextSummary ? `NEXT KEYFRAME (this frame must morph into it): ${opts.nextSummary}` : 'This is the last shot.'}
 
-REQUESTED CHANGE (from the director, in Spanish or English): ${opts.change}
+REQUESTED CHANGE (from the director, in Spanish or English): ${opts.change}${refs}
 
 Return the full rewritten shot.`;
 }
@@ -252,11 +260,16 @@ export const weightName = (w: number) => WEIGHT_NAMES[w] ?? String(w);
  * muestras de letra, no escenas: se copia la forma de cada carácter, nunca sus palabras. Sin láminas no se
  * añade nada (los prompts de siempre y el golden no cambian).
  */
-export function typographyNote(faces: Pick<Typeface, 'family' | 'role' | 'weights'>[], sheets: number, afterStyleRefs: boolean): string {
+export function typographyNote(faces: Pick<Typeface, 'family' | 'role' | 'weights'>[], sheets: number, afterStyleRefs: boolean, o: { beforeEditorRefs?: boolean } = {}): string {
   if (!sheets || !faces.length) return '';
-  const where = afterStyleRefs
-    ? sheets === 1 ? 'The last attached image is a TYPE SPECIMEN sheet' : `The last ${sheets} attached images are TYPE SPECIMEN sheets (one per typeface)`
-    : sheets === 1 ? 'The attached image is a TYPE SPECIMEN sheet' : `The ${sheets} attached images are TYPE SPECIMEN sheets (one per typeface)`;
+  // Con imágenes del editor detrás (hito 13, ADR-170) las láminas ya no son las últimas: se dice dónde van.
+  const where = o.beforeEditorRefs
+    ? afterStyleRefs
+      ? sheets === 1 ? 'The attached image right after the style references is a TYPE SPECIMEN sheet' : `The ${sheets} attached images right after the style references are TYPE SPECIMEN sheets (one per typeface)`
+      : sheets === 1 ? 'The first attached image is a TYPE SPECIMEN sheet' : `The first ${sheets} attached images are TYPE SPECIMEN sheets (one per typeface)`
+    : afterStyleRefs
+      ? sheets === 1 ? 'The last attached image is a TYPE SPECIMEN sheet' : `The last ${sheets} attached images are TYPE SPECIMEN sheets (one per typeface)`
+      : sheets === 1 ? 'The attached image is a TYPE SPECIMEN sheet' : `The ${sheets} attached images are TYPE SPECIMEN sheets (one per typeface)`;
   const w = (f: Pick<Typeface, 'weights'>) => [...f.weights].sort((a, b) => b - a);
   const uses = faces.map((f) => {
     const [heavy, ...rest] = w(f);
@@ -268,6 +281,20 @@ export function typographyNote(faces: Pick<Typeface, 'family' | 'role' | 'weight
       : `"${f.family}" for all text: ${weightName(heavy)} (${heavy}) for titles and key words, ${weightName(light)} (${light}) for the rest`;
   });
   return ` TYPOGRAPHY: ${where}, not scenes. Set the text of this frame in ${uses.join('; ')}. Reproduce the exact letterforms of each character from the specimen (proportions, stroke contrast, terminals, width, accents and Ñ), above all the large KEY LETTERS row (how a and g are built, single- or double-storey, with any ear or spur; the tail of y; the l and t; Q, R, G, J and the figures): draw each of those exactly as shown there, never a generic version; never copy the specimen's words, labels, layout or background. This typeface choice overrides any typeface named above.`;
+}
+
+/**
+ * Imágenes de referencia del editor al regenerar un fotograma (hito 13, ADR-170): van al final de las imágenes adjuntas,
+ * numeradas en el orden en que se subieron. A diferencia de las de estilo, de estas se usa el CONTENIDO, como diga la
+ * indicación del editor. Sin imágenes no se añade nada (los prompts de siempre y el golden no cambian).
+ */
+export function editorRefsNote(count: number, instruction: string, o: { others: number }): string {
+  if (!count) return '';
+  const which = o.others
+    ? count === 1 ? 'the last attached image is a CONTENT reference' : `the last ${count} attached images are CONTENT references`
+    : count === 1 ? 'the attached image is a CONTENT reference' : `the ${count} attached images are CONTENT references`;
+  const numbering = count === 1 ? 'It is "editor reference image 1".' : `They are numbered in this order: "editor reference image 1" is the first of them, up to "editor reference image ${count}".`;
+  return ` EDITOR REFERENCE IMAGES: ${which} uploaded by the editor. ${numbering} Unlike the style references, use their CONTENT exactly as the editor asks: when an image must go inside a media frame or replace an element, reproduce it faithfully there (same subject, pose, framing, colours and details; a photo stays photographic); when the editor asks for new imagery based on them, create it from their content in this frame's style. Do not copy their background, watermarks, logos or text unless the editor asks for it. EDITOR INSTRUCTION (may be in Spanish): ${instruction.replace(/\s+/g, ' ').trim()}`;
 }
 
 export function introImagePrompt(t: ThemeStyle, scene: string): string {

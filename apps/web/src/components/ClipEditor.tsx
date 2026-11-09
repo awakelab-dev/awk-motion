@@ -1,7 +1,8 @@
 import { AlertTriangle, AudioLines, Captions, Check, ChevronDown, ChevronRight, Film, ImageIcon, Loader2, MessageSquare, Play, RefreshCw, Repeat, RotateCcw, Scissors, Sparkles, Undo2, Wand2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ClipAdvice, ClipSplitInfo, ClipFeedback, ClipLogo, ClipSoundMode, ClipState, KeyframeState, RunState, VideoDelivery } from '@wilox/shared';
+import type { ClipAdvice, ClipSplitInfo, ClipFeedback, ClipLogo, ClipSoundMode, ClipState, KeyframeRefUpload, KeyframeState, RunState, VideoDelivery } from '@wilox/shared';
+import { KeyframeRefsField } from '@/components/KeyframeRefs';
 import { clipSoundTitle, soundOf } from '@/components/SoundPicker';
 import { CornerPicker, LogoOverlay } from '@/components/delivery/logo';
 import { aspectOf } from '@/components/delivery/ProjectDelivery';
@@ -302,6 +303,8 @@ function FinalAtClip({ run, c, delivery }: { run: RunState; c: ClipState; delive
 function FrameCard({ run, k, label, editable, onZoom }: { run: RunState; k?: KeyframeState; label: string; editable: boolean; onZoom: (k: { url?: string; label: string }) => void }) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
+  // Imágenes de referencia del editor (hito 13, ADR-170): siempre con indicación.
+  const [refs, setRefs] = useState<KeyframeRefUpload[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
   if (!k) return <div className="text-muted-foreground grid place-items-center rounded-lg border p-4 text-xs">{label}: no hay.</div>;
@@ -314,6 +317,7 @@ function FrameCard({ run, k, label, editable, onZoom }: { run: RunState; k?: Key
       await fn();
       setOpen(false);
       setNote('');
+      setRefs([]);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -325,16 +329,21 @@ function FrameCard({ run, k, label, editable, onZoom }: { run: RunState; k?: Key
       title: `Regenerar ${name}`,
       body: (
         <>
-          {useSuggestion ? 'Se genera una imagen nueva con el plano que sugirió Opus' : 'Opus reescribe el plano con tu indicación y se genera una imagen nueva'}; Opus la revisa. Queda como
-          propuesta: los clips no cambian hasta que la apliques.
+          {useSuggestion
+            ? 'Se genera una imagen nueva con el plano que sugirió Opus'
+            : refs.length
+              ? `Opus mira ${refs.length === 1 ? 'la imagen' : `las ${refs.length} imágenes`} y reescribe el plano con tu indicación; se genera una imagen nueva con ${refs.length === 1 ? 'ella' : 'ellas'} como referencia`
+              : 'Opus reescribe el plano con tu indicación y se genera una imagen nueva'}
+          ; Opus la revisa. Queda como propuesta: los clips no cambian hasta que la apliques.
         </>
       ),
       work: { images: 1, llm: useSuggestion ? 1 : note.trim() ? 2 : 1 },
       action: 'Regenerar',
     });
-    if (ok) await call(() => api.regenerate(run.id, k.index, useSuggestion ? { useSuggestion: true } : { note: note.trim() || undefined }));
+    if (ok) await call(() => api.regenerate(run.id, k.index, useSuggestion ? { useSuggestion: true } : { note: note.trim() || undefined, ...(refs.length ? { refs } : {}) }));
   };
   const suggestion = k.review?.verdict === 'improve' && k.review.revisedScene;
+  const needsNote = refs.length > 0 && !note.trim();
   return (
     <div className={cn('overflow-hidden rounded-lg border bg-background/40 text-xs', k.previous && 'border-warning/50')}>
       <button type="button" className="relative block aspect-video w-full cursor-zoom-in bg-secondary" onClick={() => onZoom(k)} disabled={!k.url}>
@@ -392,12 +401,14 @@ function FrameCard({ run, k, label, editable, onZoom }: { run: RunState; k?: Key
         {editable && open && (
           <div className="grid gap-1.5 pt-1">
             <Textarea rows={3} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="¿Qué debe cambiar? Vacío = otra versión del mismo plano." />
+            <KeyframeRefsField runId={run.id} index={k.index} value={refs} onChange={setRefs} disabled={busy} compact />
+            {needsNote && <div className="text-warning text-[11px]">Escribe qué hacer con las imágenes.</div>}
             <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" disabled={busy} onClick={() => void regen(false)}>
+              <Button size="sm" disabled={busy || needsNote} onClick={() => void regen(false)}>
                 {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Regenerar
               </Button>
               {suggestion && (
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void regen(true)}>
+                <Button size="sm" variant="secondary" disabled={busy || refs.length > 0} onClick={() => void regen(true)}>
                   <Wand2 /> Sugerencia de Opus
                 </Button>
               )}

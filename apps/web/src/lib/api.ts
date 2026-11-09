@@ -65,6 +65,8 @@ import type {
   ProjectAccessRequest,
   ThemeInfo,
   UserTransferResponse,
+  KeyframeMediaFrame,
+  RegenerateKeyframeRequest,
 } from '@wilox/shared';
 
 /** Se emite cuando la API responde 401 (sesión caducada o cerrada): App vuelve a la pantalla de login. */
@@ -171,8 +173,10 @@ export const api = {
   higgsfieldStart: () => req<{ connected: boolean; authUrl?: string; error?: string }>('/auth/higgsfield/start'),
   create: (body: CreateGenerationRequest) => req<RunState>('/generations', { method: 'POST', body: JSON.stringify(body) }),
   get: (id: string) => req<RunState>(`/generations/${id}`),
-  regenerate: (id: string, index: number, opts: { note?: string; useSuggestion?: boolean } = {}) =>
+  regenerate: (id: string, index: number, opts: RegenerateKeyframeRequest = {}) =>
     req<RunState>(`/generations/${id}/keyframes/${index}/regenerate`, { method: 'POST', body: JSON.stringify(opts) }),
+  /** Marcos de foto o video de un fotograma (hito 13, ADR-170). */
+  keyframeMediaFrames: (id: string, index: number) => req<KeyframeMediaFrame[]>(`/generations/${id}/keyframes/${index}/media-frames`),
   approve: (id: string) => req<RunState>(`/generations/${id}/approve`, { method: 'POST' }),
   reopen: (id: string) => req<RunState>(`/generations/${id}/reopen`, { method: 'POST' }),
   /** Insertos (ADR-073): clip generado entre clips o video subido como portada o cierre. */

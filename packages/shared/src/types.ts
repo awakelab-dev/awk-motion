@@ -61,7 +61,14 @@ export interface KeyframeState {
   /** Revisión visual de Opus antes de la aprobación humana. */
   review?: { verdict: 'ok' | 'improve'; issues: string; revisedScene?: string };
   /** Regeneración en curso (hito 5): se guarda para retomarla sola tras un reinicio de la API. */
-  pending?: { change?: string; revisedScene?: string; issues?: string; stage: 'rewrite' | 'image' | 'review' };
+  pending?: {
+    change?: string;
+    revisedScene?: string;
+    issues?: string;
+    /** Imágenes de referencia del editor (hito 13, ADR-170), relativas a la carpeta del video (refs/…). */
+    refs?: string[];
+    stage: 'rewrite' | 'image' | 'review';
+  };
   /**
    * Fotograma regenerado en un video terminado (ADR-071): la versión actual es una propuesta y esta es la
    * vigente (con la que se hicieron los clips). «Aplicar» rehace los clips afectados; «Descartar» la restaura.
@@ -808,3 +815,25 @@ export interface ClipSplitInfo {
   secondSec?: number;
 }
 
+/**
+ * Imágenes de referencia al regenerar un fotograma (hito 13, ADR-170): hasta 4, PNG, JPG o WebP de hasta 10 MB, siempre
+ * con una indicación que dice qué hacer con ellas (ponerlas en un marco, crear algo nuevo a partir de ellas…).
+ */
+export const KEYFRAME_REFS_MAX = 4;
+export const KEYFRAME_REF_MAX_BYTES = 10 * 1024 * 1024;
+export interface KeyframeRefUpload {
+  fileName: string;
+  /** data URL (base64). */
+  data: string;
+}
+export interface RegenerateKeyframeRequest {
+  note?: string;
+  useSuggestion?: boolean;
+  refs?: KeyframeRefUpload[];
+}
+/** Marco de foto o video de un fotograma (para nombrarlo en la indicación). */
+export interface KeyframeMediaFrame {
+  kind: 'video' | 'still';
+  subject: string;
+  position?: string;
+}

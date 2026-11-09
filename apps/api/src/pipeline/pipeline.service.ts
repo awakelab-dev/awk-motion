@@ -32,6 +32,7 @@ import {
   voiceTrialLabel,
   type VoiceTrialVariant,
   type VoiceTrialSettings,
+  type KeyframeMediaFrame,
 } from '@wilox/shared';
 import {
   clipVideoPrompt,
@@ -44,6 +45,7 @@ import {
   introImagePrompt,
   keyframeImagePrompt,
   referenceNote,
+  editorRefsNote,
   typographyNote,
   reviewSystemPrompt,
   reviewUserPrompt,
@@ -94,6 +96,7 @@ import { flattenPng } from '../media/flatten.js';
 import { ThemeStore } from '../themes/theme-store.js';
 import { markInterrupted, RUNNING } from '../persistence/run-data.js';
 import { askJson, toApiSchema } from './llm-json.js';
+import { decodeRefs, normalizeRef, refForLlm, refPath } from './refs.js';
 import { alignWords } from './align.js';
 import {
   applyRules,
@@ -666,13 +669,50 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     };
   }
 
-  private keyframePrompt(rec: RunRecord, index: number): string {
+  private keyframePrompt(rec: RunRecord, index: number, editor?: { count: number; instruction: string }): string {
     const base =
       index === 0 ? introImagePrompt(rec.theme, rec.storyboard!.intro.scene) : keyframeImagePrompt(rec.theme, rec.shots![index - 1]);
     const styleRefs = Math.min(rec.themeRefs.filter((r) => !r.typography).length, MAX_REFERENCES_IN_PROMPT);
     const sheets = index > 0 ? rec.themeRefs.filter((r) => r.typography).length : 0;
-    // Sin láminas, el prompt de siempre (golden); con ellas, cuáles son de estilo y qué fuente usar (ADR-094).
-    return base + referenceNote(styleRefs, { first: sheets > 0 }) + typographyNote(rec.theme.typefaces?.filter((f) => f.status === 'ready') ?? [], sheets, styleRefs > 0);
+    const extra = editor?.count ?? 0;
+    // Sin láminas, el prompt de siempre (golden); con ellas, cuáles son de estilo y qué fuente usar (ADR-094). Las
+    // imágenes del editor (ADR-170) van al final, después de las de estilo y las láminas.
+    return (
+      base +
+      referenceNote(styleRefs, { first: sheets > 0 || extra > 0 }) +
+      typographyNote(rec.theme.typefaces?.filter((f) => f.status === 'ready') ?? [], sheets, styleRefs > 0, { beforeEditorRefs: extra > 0 }) +
+      (editor ? editorRefsNote(extra, editor.instruction, { others: styleRefs + sheets }) : '')
+    );
+  }
+
+  /**
+   * Imágenes de referencia del editor para regenerar un fotograma (hito 13, ADR-170): se guardan como PNG en refs/ de la
+   * carpeta del video (también van a S3) y se devuelven sus rutas relativas, en el orden en que se subieron.
+   */
+  async saveKeyframeRefs(rec: RunRecord, index: number, uploads: Parameters<typeof decodeRefs>[0]): Promise<string[]> {
+    const files = decodeRefs(uploads);
+    if (!files.length) return [];
+    const stamp = Date.now();
+    await mkdir(join(rec.dir, 'refs'), { recursive: true });
+    const out: string[] = [];
+    for (const [i, f] of files.entries()) {
+      const { png, width, height } = await normalizeRef(f.buf).catch((e: Error) => {
+        throw new Error(`Imagen ${i + 1} (${f.name}): ${e.message}`);
+      });
+      const rel = refPath(index, stamp, i + 1);
+      const abs = join(rec.dir, rel);
+      await writeFile(abs, png);
+      this.media.dirty(abs);
+      out.push(rel);
+      this.store.log(rec, `K${nn(index)}: imagen de referencia ${i + 1} «${f.name}» guardada (${width}×${height}, ${rel}).`);
+    }
+    return out;
+  }
+
+  /** Marcos de foto o video del fotograma, en el orden del prompt («frame 1»…), para nombrarlos en la indicación. */
+  keyframeMediaFrames(rec: RunRecord, index: number): KeyframeMediaFrame[] {
+    if (index === 0 || !rec.shots?.[index - 1]) return [];
+    return rec.shots[index - 1].keyframe.mediaFrames.map((m) => ({ kind: m.kind, subject: m.subject, ...(m.position ? { position: m.position } : {}) }));
   }
 
   private clipPrompt(rec: RunRecord, clipIndex: number): string {
@@ -877,7 +917,8 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
    * sugerencia de la revisión visual) Opus reescribe el plano completo de forma coherente. Las
    * imágenes pasan por una cola con el máximo de trabajos simultáneos (IMAGE_CONCURRENCY).
    */
-  regenerateKeyframe(rec: RunRecord, index: number, note?: string, useSuggestion = false) {
+  /** Si el fotograma se puede regenerar ahora (se comprueba antes de guardar las imágenes de referencia, ADR-170). */
+  assertRegenerable(rec: RunRecord, index: number, note: string | undefined, useSuggestion: boolean, withRefs: boolean) {
     const k = rec.state.keyframes.find((x) => x.index === index);
     if (!k) throw new Error(`No existe K${nn(index)}.`);
     // En un video terminado (ADR-071) la imagen nueva es una propuesta: los clips y el final no cambian hasta «Aplicar».
@@ -887,6 +928,13 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     if (draft && !rec.storyboard) throw new Error('Falta el storyboard de este video: no se puede regenerar el fotograma.');
     if (k.status === 'generating' || k.activity) throw new Error(`K${nn(index)} ya se está regenerando.`);
     if (useSuggestion && !k.review?.revisedScene) throw new Error('Este fotograma no tiene una sugerencia de Opus.');
+    if (withRefs && useSuggestion) throw new Error('Las imágenes de referencia van con tu indicación, no con la sugerencia de Opus.');
+    if (withRefs && !note?.trim()) throw new Error('Escribe qué hacer con las imágenes de referencia: dónde va cada una o qué crear a partir de ellas.');
+    return { k, draft };
+  }
+
+  regenerateKeyframe(rec: RunRecord, index: number, note?: string, useSuggestion = false, refs: string[] = []) {
+    const { k, draft } = this.assertRegenerable(rec, index, note, useSuggestion, refs.length > 0);
     const review = k.review;
     let change = note?.trim();
     if (useSuggestion) change = `Use this corrected composition brief as the new scene and adapt layout, summary, texts, animation and endState to it: ${review!.revisedScene}. Problems it fixes: ${review!.issues}`;
@@ -910,7 +958,13 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       k.error = undefined;
       k.review = undefined;
       // Se guarda para retomarla sola tras un reinicio (ADR-046).
-      k.pending = { change: change || undefined, revisedScene: useSuggestion ? review?.revisedScene : undefined, issues: useSuggestion ? review?.issues : undefined, stage: 'rewrite' };
+      k.pending = {
+        change: change || undefined,
+        revisedScene: useSuggestion ? review?.revisedScene : undefined,
+        issues: useSuggestion ? review?.issues : undefined,
+        ...(refs.length ? { refs } : {}),
+        stage: 'rewrite',
+      };
     });
     if (!draft) this.reviewMessage(rec);
     else this.store.log(rec, `K${nn(index)}: se regenera como propuesta; los clips no cambian hasta aplicarla.`);
@@ -1057,6 +1111,9 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const k = s.keyframes.find((x) => x.index === index)!;
     const pend = k.pending ?? { stage: 'rewrite' as const };
     const change = pend.change;
+    // Imágenes de referencia del editor (ADR-170): vuelven al disco si la caché las sacó.
+    const refs = (pend.refs ?? []).map((r) => join(rec.dir, r));
+    if (refs.length) await this.media.ensure(...refs);
     if (pend.stage === 'review') {
       // La imagen ya estaba hecha cuando se cortó: solo falta la revisión de Opus.
       if (env.IMAGE_REVIEW && k.status === 'ready') {
@@ -1074,17 +1131,24 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
           rec.storyboard!.intro.scene = pend.revisedScene ?? `${rec.storyboard!.intro.scene} Change requested: ${change}`;
         } else {
           const shot = rec.shots![index - 1];
-          const revised = await this.askJson(
-            ShotSchema,
-            reviseShotSystemPrompt(rec.theme),
-            reviseShotUserPrompt({
-              shot,
-              previousSummary: index === 1 ? 'intro: only the style background, no text' : rec.shots![index - 2].keyframe.summary,
-              nextSummary: rec.shots![index]?.keyframe.summary,
-              change,
-            }),
-            'Reescritura del plano',
-          );
+          const text = reviseShotUserPrompt({
+            shot,
+            previousSummary: index === 1 ? 'intro: only the style background, no text' : rec.shots![index - 2].keyframe.summary,
+            nextSummary: rec.shots![index]?.keyframe.summary,
+            change,
+            editorRefs: refs.length || undefined,
+          });
+          // Con imágenes del editor (ADR-170), Opus las ve para escribir la escena con lo que muestran.
+          let user: LlmContent = text;
+          if (refs.length) {
+            const parts: Exclude<LlmContent, string> = [{ type: 'text', text }];
+            for (const [i, abs] of refs.entries()) {
+              parts.push({ type: 'text', text: `Editor reference image ${i + 1}:` });
+              parts.push({ type: 'image', mediaType: 'image/jpeg', base64: (await refForLlm(await readFile(abs))).toString('base64') });
+            }
+            user = parts;
+          }
+          const revised = await this.askJson(ShotSchema, reviseShotSystemPrompt(rec.theme), user, 'Reescritura del plano');
           revised.anchorWordIndex = shot.anchorWordIndex; // el tiempo no cambia
           if (!rec.theme.usesMediaFrames) revised.keyframe.mediaFrames = [];
           else applyMediaFrameRule([revised], rec.theme.mediaFrameRule);
@@ -1093,13 +1157,17 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
           this.store.update(rec, () => ((k.texts = revised.keyframe.texts), (k.label = `K${nn(index)} · ${revised.pfc}`)));
         }
       }
-      const prompt = this.keyframePrompt(rec, index);
+      const prompt = this.keyframePrompt(rec, index, refs.length ? { count: refs.length, instruction: change ?? '' } : undefined);
       this.store.update(rec, () => ((k.version += 1), (k.prompt = prompt), (k.pending = { ...pend, stage: 'image' })));
       await this.savePrompt(rec, `K${nn(index)}_imagen_v${k.version}.md`, prompt);
+      if (refs.length)
+        await this.savePrompt(rec, `K${nn(index)}_referencias_v${k.version}.json`, JSON.stringify({ instruction: change, refs: pend.refs }, null, 2));
     }
     // La imagen pasa por la cola global con la prioridad del video (ADR-045): "En cola…" hasta que hay hueco.
     this.store.update(rec, () => (k.activity = 'En cola · generando imagen…'));
     const references = await this.themeRefs(rec, index);
+    // Las del editor, al final y en su orden (el prompt las numera así, ADR-170).
+    for (const abs of refs) references.push(this.p.uploadRef ? await this.p.uploadRef(abs) : abs);
     const [r] = await this.p.images.generate([
       { key: String(index), prompt: k.prompt, references, outBase: join(rec.dir, 'keyframes', `K${nn(index)}_v${k.version}`) },
     ]);

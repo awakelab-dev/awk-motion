@@ -24,7 +24,7 @@ import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 import type { Request, Response } from 'express';
 import { map, type Observable } from 'rxjs';
 import { z } from 'zod';
-import { FPS, MAX_REFERENCES_IN_PROMPT, SOUND_MODES, type SoundMode, type ThemeStyle, type AuthUser, type GenerationSummary, type HistoryResponse, type PromptSummary, type RunState } from '@wilox/shared';
+import { FPS, KEYFRAME_REFS_MAX, MAX_REFERENCES_IN_PROMPT, SOUND_MODES, type SoundMode, type ThemeStyle, type AuthUser, type GenerationSummary, type HistoryResponse, type PromptSummary, type RunState } from '@wilox/shared';
 import { CurrentUser } from '../auth/decorators.js';
 import { Inject } from '@nestjs/common';
 import type { Db } from '@wilox/db';
@@ -128,6 +128,12 @@ const TransitionSchema = z.object({ note: z.string().max(1000).optional(), remov
 const MAX_INSERT_BYTES = 60 * 1024 * 1024;
 
 const RegenSchema = z.object({ note: z.string().max(1000).optional(), useSuggestion: z.boolean().optional() });
+// Imágenes de referencia del editor al regenerar un fotograma (hito 13, ADR-170): la indicación puede ser más larga.
+const KeyframeRegenSchema = z.object({
+  note: z.string().max(2000).optional(),
+  useSuggestion: z.boolean().optional(),
+  refs: z.array(z.object({ fileName: z.string().max(200), data: z.string().min(16) })).max(KEYFRAME_REFS_MAX, `Hasta ${KEYFRAME_REFS_MAX} imágenes de referencia.`).optional(),
+});
 
 @Controller('generations')
 export class GenerationsController {
@@ -531,11 +537,30 @@ export class GenerationsController {
   @Post(':id/keyframes/:index/regenerate')
   @HttpCode(202)
   async regenerate(@Param('id') id: string, @Param('index', ParseIntPipe) index: number, @Body() body: unknown, @CurrentUser() user: AuthUser) {
-    const { note, useSuggestion } = RegenSchema.parse(body ?? {});
+    const r = KeyframeRegenSchema.safeParse(body ?? {});
+    if (!r.success) throw new BadRequestException(r.error.issues.map((i) => i.message).join(' '));
+    const { note, useSuggestion = false, refs: uploads } = r.data;
     const rec = await this.rec(id, user);
     this.sameMode(rec);
-    this.act(() => this.pipeline.regenerateKeyframe(rec, index, note, useSuggestion));
+    let refs: string[] = [];
+    if (uploads?.length) {
+      // Primero se comprueba que se pueda regenerar; después se guardan las imágenes (ADR-170).
+      this.act(() => this.pipeline.assertRegenerable(rec, index, note, useSuggestion, true));
+      try {
+        refs = await this.pipeline.saveKeyframeRefs(rec, index, uploads);
+      } catch (e) {
+        throw new BadRequestException((e as Error).message);
+      }
+    }
+    this.act(() => this.pipeline.regenerateKeyframe(rec, index, note, useSuggestion, refs));
     return rec.state;
+  }
+
+  /** Marcos de foto o video de un fotograma, para nombrarlos al adjuntar imágenes de referencia (ADR-170). */
+  @Get(':id/keyframes/:index/media-frames')
+  async keyframeMediaFrames(@Param('id') id: string, @Param('index', ParseIntPipe) index: number, @CurrentUser() user: AuthUser) {
+    const rec = await this.rec(id, user);
+    return this.pipeline.keyframeMediaFrames(rec, index);
   }
 
   /** Descarta la propuesta de un fotograma en un video terminado (ADR-071). */

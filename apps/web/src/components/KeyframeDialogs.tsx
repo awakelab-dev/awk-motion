@@ -1,6 +1,7 @@
 import { AudioLines, Loader2, Pause, Play, Wand2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { PAUSE_MARGIN_SEC, PAUSE_MAX_SEC, PAUSE_MIN_SEC, type KeyframeState, type RunState, type VoiceSegment } from '@wilox/shared';
+import { PAUSE_MARGIN_SEC, PAUSE_MAX_SEC, PAUSE_MIN_SEC, type KeyframeRefUpload, type KeyframeState, type RunState, type VoiceSegment } from '@wilox/shared';
+import { KeyframeRefsField } from '@/components/KeyframeRefs';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,14 +14,19 @@ const kname = (k: KeyframeState) => `K${String(k.index).padStart(2, '0')}`;
 /** "Regenerar" en un pop-up (hito 5): el fotograma en grande y un campo amplio para la indicación. */
 export function RegenerateDialog({ run, k, onClose }: { run: RunState; k: KeyframeState; onClose: () => void }) {
   const [note, setNote] = useState('');
+  // Imágenes de referencia del editor (hito 13, ADR-170): siempre con indicación.
+  const [refs, setRefs] = useState<KeyframeRefUpload[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
+  const needsNote = refs.length > 0 && !note.trim();
   const send = async (useSuggestion = false) => {
     const ok = await confirmSpend({
       title: `Regenerar ${kname(k)}`,
       body: useSuggestion
         ? 'Se genera una imagen nueva con el plano que sugirió Opus; Opus la revisa.'
-        : 'Opus reescribe el plano con tu indicación, se genera una imagen nueva y Opus la revisa.',
+        : refs.length
+          ? `Opus mira ${refs.length === 1 ? 'la imagen' : `las ${refs.length} imágenes`} y reescribe el plano con tu indicación; se genera una imagen nueva con ${refs.length === 1 ? 'ella' : 'ellas'} como referencia y Opus la revisa.`
+          : 'Opus reescribe el plano con tu indicación, se genera una imagen nueva y Opus la revisa.',
       work: { images: 1, llm: useSuggestion ? 1 : 2 },
       action: 'Regenerar',
     });
@@ -28,7 +34,7 @@ export function RegenerateDialog({ run, k, onClose }: { run: RunState; k: Keyfra
     setBusy(true);
     setErr(undefined);
     try {
-      await api.regenerate(run.id, k.index, useSuggestion ? { useSuggestion: true } : { note: note.trim() || undefined });
+      await api.regenerate(run.id, k.index, useSuggestion ? { useSuggestion: true } : { note: note.trim() || undefined, ...(refs.length ? { refs } : {}) });
       onClose();
     } catch (e) {
       setErr((e as Error).message);
@@ -68,17 +74,19 @@ export function RegenerateDialog({ run, k, onClose }: { run: RunState; k: Keyfra
           />
           <p className="text-muted-foreground text-[11px]">Opus reescribe el plano completo con tu indicación y la imagen nueva entra en la cola con la prioridad de este video.</p>
         </div>
+        <KeyframeRefsField runId={run.id} index={k.index} value={refs} onChange={setRefs} disabled={busy} />
         {err && <p className="text-destructive text-xs">{err}</p>}
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
+          {needsNote && <span className="text-warning self-center text-[11px]">Escribe qué hacer con las imágenes.</span>}
           {k.review?.revisedScene && (
-            <Button variant="secondary" onClick={() => send(true)} disabled={busy}>
+            <Button variant="secondary" onClick={() => send(true)} disabled={busy || refs.length > 0} title={refs.length ? 'Las imágenes van con tu indicación' : undefined}>
               <Wand2 /> Aplicar sugerencia de Opus
             </Button>
           )}
-          <Button onClick={() => send()} disabled={busy}>
+          <Button onClick={() => send()} disabled={busy || needsNote}>
             {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Regenerar
           </Button>
         </div>
