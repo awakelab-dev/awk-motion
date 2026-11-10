@@ -46,6 +46,8 @@ export function ClipEditor({
   const kStart = run.keyframes.find((k) => k.index === c.index - 1);
   const kEnd = run.keyframes.find((k) => k.index === c.index);
   const done = run.status === 'done';
+  // Con el final al día se sigue corrigiendo mientras se regeneran clips o se vuelve a unir el final (ADR-171).
+  const live = canCorrectLive(run);
   const anyWorking = run.keyframes.some((k) => k.status === 'generating' || k.activity);
   const logoHere = delivery ? (delivery.clipCorners[String(c.index)] ?? delivery.settings.corner) : undefined;
   const [zoom, setZoom] = useState<{ url?: string; label: string }>();
@@ -149,13 +151,13 @@ export function ClipEditor({
               { k: kStart, label: 'Fotograma inicial' },
               { k: kEnd, label: 'Fotograma final' },
             ].map(({ k, label }) => (
-              <FrameCard key={label} run={run} k={k} label={label} editable={done} onZoom={(x) => setZoom(x)} />
+              <FrameCard key={label} run={run} k={k} label={label} editable={live} onZoom={(x) => setZoom(x)} />
             ))}
           </div>
         </div>
 
         <div className="grid min-w-0 content-start gap-4 text-xs">
-          <ClipFeedbackPanel run={run} c={c} autoAnalyze={autoAnalyze} editable={done} onUseNote={setNote} />
+          <ClipFeedbackPanel run={run} c={c} autoAnalyze={autoAnalyze} editable={live} onUseNote={setNote} />
           <section className="grid gap-2">
             <div className="font-medium">Regenerar el clip</div>
             <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Indicación opcional (p. ej. más movimiento en la foto)" />
@@ -424,6 +426,12 @@ function FrameCard({ run, k, label, editable, onZoom }: { run: RunState; k?: Key
   );
 }
 
+/**
+ * Video con final en el que se sigue corrigiendo (ADR-171): terminado, con clips regenerándose o con el final volviéndose
+ * a unir. Regenerar fotogramas y clips y aplicar propuestas van a la cola sin esperar a lo demás.
+ */
+export const canCorrectLive = (run: RunState) => !!run.finalUrl && ['done', 'clips', 'post', 'render'].includes(run.status);
+
 /** Versión vigente de cada fotograma (la de los clips) mientras hay propuestas. */
 const keyVersion = (run: RunState, i: number) => run.keyframes.find((k) => k.index === i)?.version ?? 1;
 
@@ -440,7 +448,7 @@ export function KeyframeProposals({ run }: { run: RunState }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
   const proposals = run.keyframes.filter((k) => k.previous);
-  if (!proposals.length || run.status !== 'done') return null;
+  if (!proposals.length || !canCorrectLive(run)) return null;
   const working = run.keyframes.some((k) => k.status === 'generating' || k.activity);
   const affected = affectedClips(run);
   const apply = async () => {

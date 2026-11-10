@@ -922,11 +922,19 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const k = rec.state.keyframes.find((x) => x.index === index);
     if (!k) throw new Error(`No existe K${nn(index)}.`);
     // En un video terminado (ADR-071) la imagen nueva es una propuesta: los clips y el final no cambian hasta «Aplicar».
-    const draft = rec.state.status === 'done' && rec.approved;
-    if ((rec.state.status !== 'awaiting_approval' && !draft) || rec.busy)
+    // Desde ADR-171 también mientras se regeneran clips o se vuelve a unir el final: la propuesta no toca nada de eso.
+    const draft = this.hasLiveFinal(rec);
+    if (draft ? false : rec.state.status !== 'awaiting_approval' || rec.busy)
       throw new Error('Solo se pueden regenerar fotogramas durante la revisión o con el video terminado.');
     if (draft && !rec.storyboard) throw new Error('Falta el storyboard de este video: no se puede regenerar el fotograma.');
     if (k.status === 'generating' || k.activity) throw new Error(`K${nn(index)} ya se está regenerando.`);
+    if (draft) {
+      // Un clip que se está regenerando usa este fotograma: la propuesta tiene que esperar (como regenerar un clip
+      // espera a que se aplique o descarte la propuesta de sus fotogramas).
+      const busyClips = rec.state.clips.filter((c) => (c.index === index || c.index === index + 1) && (c.status === 'pending' || c.status === 'generating'));
+      if (busyClips.length)
+        throw new Error(`${busyClips.map((c) => `clip${nn(c.index)}`).join(' y ')} se está${busyClips.length > 1 ? 'n' : ''} regenerando con K${nn(index)}: espera a que termine para cambiar este fotograma.`);
+    }
     if (useSuggestion && !k.review?.revisedScene) throw new Error('Este fotograma no tiene una sugerencia de Opus.');
     if (withRefs && useSuggestion) throw new Error('Las imágenes de referencia van con tu indicación, no con la sugerencia de Opus.');
     if (withRefs && !note?.trim()) throw new Error('Escribe qué hacer con las imágenes de referencia: dónde va cada una o qué crear a partir de ellas.');
@@ -971,6 +979,15 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     this.runRegen(rec, index);
   }
 
+  /**
+   * Video con final en el que se puede seguir corrigiendo (ADR-171): terminado o con clips regenerándose o el final
+   * volviéndose a unir. Las correcciones van a la cola y no esperan a que termine lo demás.
+   */
+  private hasLiveFinal(rec: RunRecord): boolean {
+    const s = rec.state;
+    return !!rec.approved && !!s.finalUrl && ['done', 'clips', 'post', 'render'].includes(s.status) && !this.queue.isPaused(s.id);
+  }
+
   /** Descarta la propuesta de un fotograma (ADR-071): vuelve la versión vigente con su plano. */
   discardKeyframe(rec: RunRecord, index: number) {
     const k = rec.state.keyframes.find((x) => x.index === index);
@@ -1010,11 +1027,34 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
    */
   applyKeyframes(rec: RunRecord) {
     const s = rec.state;
-    if (s.status !== 'done' || !rec.approved || rec.busy) throw new Error('Solo se aplican propuestas de un video terminado.');
-    if (s.keyframes.some((k) => k.activity || k.status === 'generating')) throw new Error('Espera a que terminen las regeneraciones en curso.');
+    // Con el final al día (ADR-171), cada clip afectado va a la cola por su lado, como «Regenerar clip»: se puede
+    // seguir corrigiendo mientras tanto. Sin final, como antes (fase 2 completa).
+    const live = this.hasLiveFinal(rec);
+    if (!live && (s.status !== 'done' || !rec.approved || rec.busy)) throw new Error('Solo se aplican propuestas de un video terminado.');
+    if (s.keyframes.some((k) => k.activity || k.status === 'generating')) throw new Error('Espera a que terminen las regeneraciones de fotogramas en curso.');
     const bad = s.keyframes.filter((k) => k.status !== 'ready');
     if (bad.length) throw new Error(`Hay fotogramas con error (${bad.map((k) => `K${nn(k.index)}`).join(', ')}): regénéralos o descarta la propuesta.`);
     const affected = this.affectedClips(rec);
+    if (live) {
+      const running = s.clips.filter((c) => c.status === 'pending' || c.status === 'generating' || this.insertJobs.get(rec)?.has(`c${c.index}`));
+      const clash = affected.filter((c) => running.includes(c));
+      if (clash.length) throw new Error(`${clash.map((c) => `clip${nn(c.index)}`).join(', ')} se está regenerando: espera a que termine para aplicar.`);
+      const prevs = new Map(affected.map((c) => [c.index, { version: c.version, url: c.url, deliveredFrames: c.deliveredFrames, builtWith: c.builtWith, note: c.note, ssimStart: c.ssimStart, ssimEnd: c.ssimEnd }]));
+      this.store.update(rec, (st) => {
+        for (const k of st.keyframes) k.previous = undefined;
+        for (const c of affected) {
+          c.status = 'pending';
+          c.version += 1;
+          c.error = undefined;
+          c.taskId = undefined;
+        }
+      });
+      if (!affected.length) return;
+      this.store.log(rec, `Propuestas aplicadas: se rehacen ${affected.map((c) => `clip${nn(c.index)}`).join(', ')} en la cola, con prioridad; el final se vuelve a unir al terminar.`);
+      this.urgent.add(rec);
+      for (const c of affected) this.kickClip(rec, c, prevs.get(c.index));
+      return;
+    }
     this.store.update(rec, (st) => {
       for (const k of st.keyframes) k.previous = undefined;
       for (const c of affected) {
