@@ -29,6 +29,10 @@ export interface TtsOptions {
    * `stability` (qué tan constante), de 0 a 1. Sin ellos, los de la voz en ElevenLabs.
    */
   voiceSettings?: { similarityBoost?: number; stability?: number };
+  /** Texto que va antes (hito 13a, voz v4): ElevenLabs lo usa como contexto para el tono; no se locuta. */
+  previousText?: string;
+  /** Semilla (hito 13a, voz v4): «mejor esfuerzo» para que el mismo párrafo suene igual al pedirlo de nuevo. */
+  seed?: number;
 }
 
 export interface ImageRequest {

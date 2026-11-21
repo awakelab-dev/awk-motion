@@ -1,5 +1,6 @@
 import type { ThemeId, ThemeInfo } from './theme.js';
 import type { VoiceTrialVariant } from './voice-trial.js';
+import type { ProjectVoice } from './voice.js';
 
 export type GenerationMode = 'mcp' | 'api' | 'mock';
 
@@ -169,6 +170,15 @@ export interface RunState {
    * de tono entre ellos; «Rehacer audio» vuelve a pedir toda); sin el campo = un pedido por párrafo (videos anteriores).
    */
   voiceMode?: VoiceMode;
+  /**
+   * Versión de la voz (hito 13a, ADR-177): 'v4' = un pedido por párrafo a `eleven_v4` con contexto y semilla («Rehacer
+   * audio» pide solo ese párrafo); sin el campo = v3 (como hasta el hito 13). La hereda del proyecto al crearse.
+   */
+  voiceModel?: 'v4';
+  /** Semilla de la voz v4 (la del proyecto al crearse el video): los párrafos que se rehacen la repiten. */
+  voiceSeed?: number;
+  /** Velocidad aplicada a la locución actual (hito 13a, T2, ADR-178); sin el campo = 1. */
+  voiceSpeed?: number;
   text: string;
   status: RunStatus;
   /** Mensaje corto del paso en curso. */
@@ -317,6 +327,8 @@ export interface ProjectSummary {
   thumbnailUrl?: string;
   /** Tema, voz y música del último video del proyecto: valores por defecto de un video nuevo (hito 5, ADR-053). */
   defaults?: { theme: ThemeId; voiceId: string; musicTrack: string | null; soundMode?: SoundMode };
+  /** Voz del proyecto (hito 13a, ADR-177): versión (v3/v4) y velocidad de la narración de los videos nuevos. */
+  voice?: ProjectVoice;
   /** Acceso (hito 11, ADR-142): mi papel en el proyecto, su dueño, si es público y con cuántos usuarios se comparte. */
   access: ProjectAccessSummary;
 }
@@ -659,6 +671,8 @@ export interface CostUnits {
   image?: CostUnit;
   clip?: CostUnit;
   tts1k?: CostUnit;
+  /** Locución con la voz v4 (hito 13a), por cada 1.000 caracteres; sin muestras (`samples` 0), la de v3 por la razón medida. */
+  tts1kV4?: CostUnit;
   llm?: CostUnit;
 }
 

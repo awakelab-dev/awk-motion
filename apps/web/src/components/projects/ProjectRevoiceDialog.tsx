@@ -28,7 +28,7 @@ export function ProjectRevoiceDialog({ project, onClose, onStarted }: { project:
     projectsApi.revoiceCandidates(project.id).then(
       (c) => {
         setCandidates(c);
-        setSelected(new Set(c.filter((v) => v.available && v.voiceMode === 'paragraph').map((v) => v.id)));
+        setSelected(new Set(c.filter((v) => v.available && v.voiceMode === 'paragraph' && v.voiceModel !== 'v4').map((v) => v.id)));
       },
       (e: Error) => (setError(e.message), setCandidates([])),
     );
@@ -36,8 +36,9 @@ export function ProjectRevoiceDialog({ project, onClose, onStarted }: { project:
 
   const available = useMemo(() => (candidates ?? []).filter((c) => c.available), [candidates]);
   const chosen = available.filter((c) => selected.has(c.id));
-  const chars = chosen.reduce((n, c) => n + c.chars, 0);
-  const byParagraph = available.filter((c) => c.voiceMode === 'paragraph');
+  const chars = chosen.filter((c) => c.voiceModel !== 'v4').reduce((n, c) => n + c.chars, 0);
+  const charsV4 = chosen.filter((c) => c.voiceModel === 'v4').reduce((n, c) => n + c.chars, 0);
+  const byParagraph = available.filter((c) => c.voiceMode === 'paragraph' && c.voiceModel !== 'v4');
   const toggle = (id: string) =>
     setSelected((s) => {
       const n = new Set(s);
@@ -50,8 +51,8 @@ export function ProjectRevoiceDialog({ project, onClose, onStarted }: { project:
     const n = chosen.length;
     const ok = await confirmSpend({
       title: `Rehacer la locución de ${n} video${n === 1 ? '' : 's'}`,
-      body: 'Cada video se vuelve a locutar entero en un solo pedido, con la misma voz y el mismo texto, para que no cambie de tono, velocidad ni acento entre párrafos. Los fotogramas y los clips no cambian: se rehacen el post y el final (el anterior se conserva). Los videos esperan su turno en la cola.',
-      work: { ttsChars: chars },
+      body: 'Cada video se vuelve a locutar entero con la misma voz y el mismo texto: en v3, en un solo pedido (para que no cambie de tono, velocidad ni acento entre párrafos); en v4, párrafo por párrafo con el contexto de sus vecinos y la misma semilla. Los fotogramas y los clips no cambian: se rehacen el post y el final (el anterior se conserva). Los videos esperan su turno en la cola.',
+      work: { ttsChars: chars, ttsV4Chars: charsV4 },
       action: `Rehacer ${n} ${n === 1 ? 'locución' : 'locuciones'}`,
     });
     if (!ok) return;
@@ -143,8 +144,8 @@ export function ProjectRevoiceDialog({ project, onClose, onStarted }: { project:
                     {!c.available ? (
                       <span className="text-muted-foreground shrink-0 text-[10.5px]">{c.reason}</span>
                     ) : (
-                      <span className={cn('shrink-0 text-[10.5px]', c.voiceMode === 'paragraph' ? 'text-warning' : 'text-muted-foreground')}>
-                        {c.voiceMode === 'paragraph' ? 'por párrafo' : 'un solo pedido'}
+                      <span className={cn('shrink-0 text-[10.5px]', c.voiceMode === 'paragraph' && c.voiceModel !== 'v4' ? 'text-warning' : 'text-muted-foreground')}>
+                        {c.voiceModel === 'v4' ? 'v4 por párrafo' : c.voiceMode === 'paragraph' ? 'por párrafo' : 'un solo pedido'}
                       </span>
                     )}
                     {c.published && <Globe className="text-success size-3.5 shrink-0" aria-label="Publicado" />}

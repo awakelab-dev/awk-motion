@@ -19,6 +19,8 @@ export interface SpendWork {
   clips?: number;
   /** Caracteres de locución. */
   ttsChars?: number;
+  /** Caracteres de locución con la voz v4 (hito 13a: otra tarifa por carácter). */
+  ttsV4Chars?: number;
   /** Llamadas a Opus. */
   llm?: number;
 }
@@ -60,6 +62,7 @@ export function estimate(u: CostUnits, w: SpendWork): { text?: string; missing: 
   add(u.image, w.images, 'imágenes');
   add(u.clip, w.clips, 'clips');
   add(u.tts1k, w.ttsChars ? w.ttsChars / 1000 : 0, 'locución');
+  add(u.tts1kV4, w.ttsV4Chars ? w.ttsV4Chars / 1000 : 0, 'locución v4');
   add(u.llm, w.llm, 'Opus');
   return { text: usd > 0 ? `≈ US$ ${nf(usd)}` : undefined, missing };
 }
@@ -84,6 +87,7 @@ function workText(w: SpendWork, approx?: boolean) {
     w.images ? `${a}${w.images} imagen${w.images === 1 ? '' : 'es'}` : '',
     w.clips ? `${a}${w.clips} clip${w.clips === 1 ? '' : 's'} de video` : '',
     w.ttsChars ? `locución de ${nf(w.ttsChars, 0)} caracteres` : '',
+    w.ttsV4Chars ? `locución v4 de ${nf(w.ttsV4Chars, 0)} caracteres` : '',
     w.llm ? `Opus${w.llm > 1 ? ` (${w.llm} llamadas)` : ''}` : '',
   ]
     .filter(Boolean)

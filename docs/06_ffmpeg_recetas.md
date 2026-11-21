@@ -100,3 +100,17 @@ ffmpeg -y -i segments/clip01.mp4 -i segments/clip01_sound.wav -map 0:v -map 1:a 
 
 ## Voz cortada por clip
 Cortar por muestras: 1 frame = 2000 muestras a 48 kHz. Por ejemplo, con `atrim=start_sample=…:end_sample=…`, exportando a `clipNN.mp3`. El MP3 añade ~40 ms de padding.
+
+## Hito 13a · Voz v4: recortar el párrafo con margen fijo (ADR-177)
+Con la alineación del párrafo: desde 0,06 s antes de la primera palabra hasta 0,15 s después de la última; si el audio no alcanza, se completa con silencio (`adelay` al inicio, `apad` al final).
+```bash
+ffmpeg -y -i parrafo02.raw.48k.wav -af "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0.214:7.351,asetpts=N/SR/TB" \
+  -ac 2 -ar 48000 -c:a pcm_s16le parrafo02.48k.wav
+```
+
+## Hito 13a · Velocidad de la narración con rubberband (ADR-178)
+Estira el audio sin cambiar el tono; `tempo` < 1 = más lento (0,85 → el audio dura 1/0,85). Se aplica a cada párrafo por separado (las pausas entre párrafos no se estiran). Costo medido: 3,8 s de CPU por 3 min de voz. Sin el filtro (`ffmpeg -filters | grep rubberband` vacío), la app usa `atempo` y lo avisa en el log.
+```bash
+ffmpeg -y -i parrafo01.48k.wav -af "aresample=48000,aformat=channel_layouts=stereo,rubberband=tempo=0.85:pitchq=quality:channels=together" \
+  -ac 2 -ar 48000 -c:a pcm_s16le parrafo01_velocidad.wav
+```

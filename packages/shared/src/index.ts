@@ -8,3 +8,4 @@ export * from './publication.js';
 export * from './voice-trial.js';
 export * from './revoice.js';
 export * from './brand.js';
+export * from './voice.js';

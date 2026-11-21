@@ -50,7 +50,7 @@ export function ChangeConfirmHost() {
       <div className="grid gap-4 text-sm">
         <div className="border-warning/30 bg-warning/10 flex items-start gap-2 rounded-lg border p-3">
           <AlertTriangle className="text-warning mt-0.5 size-4 shrink-0" />
-          <span>{p.message}</span>
+          <span className="whitespace-pre-line">{p.message}</span>
         </div>
         <div className="flex justify-end gap-2">
           {p.action ? (

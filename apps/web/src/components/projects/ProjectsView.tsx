@@ -21,6 +21,7 @@ import {
   X,
   Globe,
   Mic,
+  Gauge,
   Crown,
   Users,
   ChevronLeft,
@@ -43,6 +44,8 @@ import { STATE_LABEL, askNotifications, useQueue } from '@/lib/queue';
 import { ProjectLogoButton } from '@/components/delivery/ProjectDelivery';
 import { ProjectDownloadDialog } from '@/components/downloads/ProjectDownloadDialog';
 import { ProjectRevoiceDialog } from '@/components/projects/ProjectRevoiceDialog';
+import { ProjectVoiceDialog } from '@/components/projects/ProjectVoiceDialog';
+import { speedText } from '@/components/voice/SpeedPicker';
 import { ProjectShareDialog } from '@/components/projects/ProjectShareDialog';
 import { ProjectAccessDialog, userLabel } from '@/components/projects/ProjectAccessDialog';
 import { SeeAllToggle, useSeeAll } from '@/lib/see-all';
@@ -185,6 +188,7 @@ function ProjectHeader({
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [revoicing, setRevoicing] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
   // Hito 11 (ADR-142): papelera, archivo y compartir son del dueño (compartir, también del admin).
   const isOwner = project.access.role === 'owner';
@@ -310,6 +314,18 @@ function ProjectHeader({
             <h2 className="truncate text-lg font-semibold tracking-tight">{project.name}</h2>
             {project.unclassified && <Badge variant="secondary">Fijo</Badge>}
             {project.archived && <Badge variant="secondary">Archivado</Badge>}
+            {project.voice && (
+              <Badge
+                variant="secondary"
+                title={
+                  project.voice.model === 'v4'
+                    ? 'Voz v4: la locución se pide por párrafo, con el contexto de sus vecinos y la semilla del proyecto; «Rehacer audio» cambia solo ese párrafo.'
+                    : 'Voz v3: la locución se pide entera en un solo pedido; «Rehacer audio» la vuelve a pedir toda.'
+                }
+              >
+                Voz {project.voice.model} · {speedText(project.voice.speed)}
+              </Badge>
+            )}
             <AccessBadges p={project} />
           </div>
           {!isOwner && (
@@ -348,6 +364,9 @@ function ProjectHeader({
             </Button>
           )}
           <ProjectLogoButton project={project} />
+          <Button size="sm" variant="outline" onClick={() => setVoiceOpen(true)} title="Velocidad de la narración (con muestra) y «Cambiar velocidad» de los videos ya hechos">
+            <Gauge /> Voz
+          </Button>
           <Button size="sm" variant="outline" disabled={!project.totals.videos} onClick={() => setRevoicing(true)} title="Volver a locutar varios videos en un solo pedido cada uno, con la misma voz: sin cambios de tono entre párrafos">
             <Mic /> Rehacer la locución
           </Button>
@@ -407,6 +426,7 @@ function ProjectHeader({
       {downloading && <ProjectDownloadDialog project={project} onClose={() => setDownloading(false)} />}
       {sharing && <ProjectShareDialog project={project} onClose={() => setSharing(false)} />}
       {revoicing && <ProjectRevoiceDialog project={project} onClose={() => setRevoicing(false)} onStarted={askNotifications} />}
+      {voiceOpen && <ProjectVoiceDialog project={project} onClose={() => setVoiceOpen(false)} onChanged={onChanged} />}
       {accessOpen && <ProjectAccessDialog project={project} me={me} onClose={() => setAccessOpen(false)} onChanged={() => onChanged(project)} />}
     </div>
   );

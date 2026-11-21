@@ -98,4 +98,17 @@ describe('ElevenLabs: opciones de la prueba de voz (ADR-129, ADR-131)', () => {
     await new ElevenLabsTts('k', 'eleven_v3').synthesize('Hola mundo', 'v1', join(dir, 'f'));
     expect(sent).toEqual({ text: 'Hola mundo', model_id: 'eleven_v3' });
   });
+
+  it('voz v4 (hito 13a): contexto anterior y siguiente y semilla, sin enlace por request_id', async () => {
+    let sent: Record<string, unknown> = {};
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/with-timestamps')) {
+        sent = JSON.parse(String(init?.body));
+        return ok({ 'history-item-id': 'h-7' });
+      }
+      return new Response('{}');
+    }));
+    await new ElevenLabsTts('k', 'eleven_v3').synthesize('Hola mundo', 'v1', join(dir, 'g'), { model: 'eleven_v4', previousText: 'Antes.', nextText: 'Después.', seed: 1234 });
+    expect(sent).toEqual({ text: 'Hola mundo', model_id: 'eleven_v4', next_text: 'Después.', previous_text: 'Antes.', seed: 1234 });
+  });
 });

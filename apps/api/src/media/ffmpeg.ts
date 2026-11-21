@@ -520,6 +520,40 @@ export async function extractAudio(input: string, startSec: number, durSec: numb
   await ffmpeg(['-ss', startSec.toFixed(3), '-t', durSec.toFixed(3), '-i', input, '-vn', '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', output]);
 }
 
+let rubberband: Promise<boolean> | undefined;
+
+/**
+ * Estira (o acorta) un audio sin cambiar el tono (velocidad de la narración, hito 13a, ADR-178): `tempo` < 1 = más lento
+ * y más largo. Con ffmpeg `rubberband` (en el servidor; 3,8 s de CPU por 3 min de voz); si el ffmpeg no lo trae (p. ej.
+ * en un Mac de desarrollo), `atempo`, algo peor, con un aviso en el log. Sale en WAV de 48 kHz estéreo.
+ */
+export async function stretchAudio(input: string, tempo: number, output: string): Promise<'rubberband' | 'atempo'> {
+  rubberband ??= hasFilter('rubberband').then((ok) => {
+    if (!ok) console.warn('[ffmpeg] Sin el filtro rubberband: la velocidad de la narración usa atempo (calidad algo menor).');
+    return ok;
+  });
+  const rb = await rubberband;
+  const f = rb ? `rubberband=tempo=${tempo.toFixed(6)}:pitchq=quality:channels=together` : `atempo=${tempo.toFixed(6)}`;
+  await ffmpeg(['-i', input, '-af', `aresample=48000,aformat=channel_layouts=stereo,${f}`, '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', output]);
+  return rb ? 'rubberband' : 'atempo';
+}
+
+/**
+ * Recorta un audio a [start, end] y le agrega silencio antes y después (voz v4, hito 13a): así cada párrafo empieza y
+ * termina con el mismo margen. Sale en WAV de 48 kHz estéreo.
+ */
+export async function trimPadAudio(input: string, w: { start: number; end: number; padStart: number; padEnd: number }, output: string) {
+  const f = [
+    'aresample=48000',
+    'aformat=sample_fmts=fltp:channel_layouts=stereo',
+    `atrim=${w.start.toFixed(6)}:${w.end.toFixed(6)}`,
+    'asetpts=N/SR/TB',
+    ...(w.padStart > 1e-4 ? [`adelay=delays=${Math.round(w.padStart * 48000)}S:all=1`] : []),
+    ...(w.padEnd > 1e-4 ? [`apad=pad_dur=${w.padEnd.toFixed(6)}`] : []),
+  ].join(',');
+  await ffmpeg(['-i', input, '-af', f, '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', output]);
+}
+
 /**
  * Voz con huecos (ADR-073): la locución cortada en cada punto de inserción, con silencio del largo del
  * inserto (su propia locución va aparte, como pista superpuesta).

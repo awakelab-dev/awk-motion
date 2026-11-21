@@ -29,6 +29,7 @@ import {
   Wand2,
   X,
   Mic,
+  Gauge,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -54,6 +55,7 @@ import { api } from '@/lib/api';
 import { clipsFor, confirmSpend, useCostText } from '@/lib/spend';
 import { cn } from '@/lib/utils';
 import { useVoiceName } from '@/lib/voices';
+import { SpeedPicker, speedText } from '@/components/voice/SpeedPicker';
 import { CLIP_OPEN_EVENT, takeClipRequest } from '@/lib/clip-open';
 import { goTo } from '@/lib/batches';
 
@@ -1085,14 +1087,33 @@ function Corrections({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(run.text);
-  const [busy, setBusy] = useState<'reopen' | 'version' | 'music' | 'sound' | 'rule' | 'revoice'>();
+  const [busy, setBusy] = useState<'reopen' | 'version' | 'music' | 'sound' | 'rule' | 'revoice' | 'speed'>();
+  /** «Cambiar velocidad» (hito 13a, T2, ADR-178): sin pedir voz ni clips. */
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [speed, setSpeed] = useState(run.voiceSpeed ?? 1);
+  useEffect(() => setSpeed(run.voiceSpeed ?? 1), [run.id, run.voiceSpeed]);
+  const changeSpeed = async () => {
+    setBusy('speed');
+    setError(undefined);
+    try {
+      await api.changeSpeed(run.id, speed);
+      setSpeedOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
   /** «Rehacer la locución» (ADR-134): toda la locución en un solo pedido, con la misma voz. */
   const revoiceAll = async () => {
     const chars = run.paragraphs.reduce((n, p) => n + (p.spokenText ?? p.text).length, 0);
+    const v4 = run.voiceModel === 'v4';
     const ok = await confirmSpend({
       title: 'Rehacer la locución',
-      body: 'Se vuelve a locutar todo el video en un solo pedido, con la misma voz y el mismo texto, para que no cambie de tono, velocidad ni acento entre párrafos. Los fotogramas y los clips no cambian: se rehacen el post y el final (el anterior se conserva).',
-      work: { ttsChars: chars },
+      body: v4
+        ? 'Voz v4: se vuelve a locutar todo el video, párrafo por párrafo con el contexto de sus vecinos y la misma semilla, con la misma voz y el mismo texto. Los fotogramas y los clips no cambian: se rehacen el post y el final (el anterior se conserva). Las pausas cambiadas a mano se pierden.'
+        : 'Se vuelve a locutar todo el video en un solo pedido, con la misma voz y el mismo texto, para que no cambie de tono, velocidad ni acento entre párrafos. Los fotogramas y los clips no cambian: se rehacen el post y el final (el anterior se conserva).',
+      work: v4 ? { ttsV4Chars: chars } : { ttsChars: chars },
       action: 'Rehacer la locución',
     });
     if (!ok) return;
@@ -1259,6 +1280,11 @@ function Corrections({
               {busy === 'revoice' ? <Loader2 className="animate-spin" /> : <Mic />} Rehacer la locución
             </Button>
           )}
+          {run.status === 'done' && run.mode !== 'mcp' && (
+            <Button size="sm" variant="outline" onClick={() => setSpeedOpen((v) => !v)} disabled={!!busy} title="Estira la locución actual a otra velocidad: sin pedir voz ni clips (sin costo)">
+              {busy === 'speed' ? <Loader2 className="animate-spin" /> : <Gauge />} Cambiar velocidad ({speedText(run.voiceSpeed ?? 1)})
+            </Button>
+          )}
         </div>
         {ruleOpen && run.status === 'done' && rulePlan?.available && (
           <div className="grid gap-2 text-xs">
@@ -1303,6 +1329,23 @@ function Corrections({
               <span className="text-muted-foreground text-[11px]">
                 Solo se vuelve a renderizar (sin costo de proveedores) y queda un final nuevo; el anterior se conserva.
               </span>
+            </div>
+          </div>
+        )}
+        {speedOpen && run.status === 'done' && (
+          <div className="grid gap-2 text-xs">
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Se estira la locución actual (sin cambiar el tono): no se pide voz ni clips, sin costo. Más pausada = más tiempo congelado; más rápida = menos. Se
+              rehacen el post y el final (el anterior se conserva).
+            </p>
+            <SpeedPicker value={speed} onChange={setSpeed} model={run.voiceModel === 'v4' ? 'v4' : 'v3'} voiceId={run.voiceId} current={run.voiceSpeed ?? 1} disabled={!!busy} />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => void changeSpeed()} disabled={!!busy || Math.abs(speed - (run.voiceSpeed ?? 1)) < 1e-3}>
+                <Gauge /> Cambiar a {speedText(speed)}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSpeedOpen(false)}>
+                Cancelar
+              </Button>
             </div>
           </div>
         )}

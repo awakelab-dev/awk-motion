@@ -180,6 +180,13 @@ model Project {
   /// Público (hito 11, ADR-142): desde esta fecha lo ven y lo gestionan todos los usuarios de la app (nulo = no).
   /// «Sin clasificar» nunca es público.
   publicAt    DateTime?
+  /// Voz del proyecto (hito 13a, ADR-177): 'v4' = eleven_v4 por párrafo con contexto y semilla; nulo = v3 (los proyectos
+  /// anteriores al hito 13a). Los nuevos nacen en v4; uno en v3 pasa a v4 una sola vez (nunca de vuelta).
+  voiceModel  String?   @default("v4")
+  /// Semilla de la voz v4 del proyecto (al azar, se fija la primera vez que hace falta).
+  voiceSeed   Int?
+  /// Velocidad de la narración de los videos nuevos (T2, ADR-178): 0,70–1,15; nulo = 1 (los anteriores).
+  voiceSpeed  Float?    @default(0.85)
 
   owner       User           @relation(fields: [ownerId], references: [id])
   generations Generation[]
@@ -298,6 +305,14 @@ model Generation {
   soundGainDb      Float                    @default(0)
   /// Cómo se pidió la locución (hito 10, ADR-133): 'whole' (un solo pedido) | 'paragraph'; nulo = por párrafo.
   voiceMode        String?
+  /// Versión de la voz (hito 13a, ADR-177): 'v4' | nulo (= v3). La hereda del proyecto al crearse.
+  voiceModel       String?
+  /// Semilla de la voz v4 con la que se locutó (la del proyecto al crearse).
+  voiceSeed        Int?
+  /// Velocidad aplicada a su locución actual (T2, ADR-178); nulo = 1.
+  voiceSpeed       Float?
+  /// Regla de sincronía de los planos (T5): 'v2' = palabra clave + 0,5 s; nulo = la de antes (1 s antes).
+  syncRule         String?
   /// Ajuste fino de la entrega de este video (hito 6, ADR-065): { settings?: ajustes del logo, posterSec? }.
   delivery         Json?
   /// Clips insertados o subidos fuera de la locución (hito 6, ADR-073): InsertState[].

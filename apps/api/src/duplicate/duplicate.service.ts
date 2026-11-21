@@ -10,6 +10,7 @@ import { RunStore } from '../generations/run-store.js';
 import { HistoryService } from '../projects/history.service.js';
 import { MediaService } from '../storage/media.service.js';
 import { AccessService } from '../access/access.service.js';
+import { VoiceProjectService } from '../voice/voice-project.service.js';
 
 /** Se duplica un video que no está trabajando: terminado, con error, detenido o esperando la aprobación de fotogramas. */
 export const DUPLICABLE: RunStatus[] = ['done', 'error', 'paused', 'awaiting_approval'];
@@ -67,6 +68,7 @@ export class DuplicateService {
     private readonly media: MediaService,
     private readonly history: HistoryService,
     private readonly access: AccessService,
+    private readonly voiceProject: VoiceProjectService,
   ) {}
 
   progress(projectId: string): ProjectSummary['copying'] {
@@ -94,13 +96,26 @@ export class DuplicateService {
   }
 
   /** Duplica un video en su proyecto o en otro. */
-  async duplicateVideo(id: string, user: AuthUser, projectId?: string): Promise<GenerationSummary> {
+  async duplicateVideo(id: string, user: AuthUser, projectId?: string, confirmed = false): Promise<GenerationSummary> {
     // El acceso al video lo comprobó el guard (generations/:id…).
     const g = await this.db.generation.findFirst({ where: { id, trashedAt: null }, select: { id: true, status: true, projectId: true } });
     if (!g) throw new NotFoundException('Video no encontrado.');
     if (!DUPLICABLE.includes(this.statusOf(id, g.status))) throw new BadRequestException('El video se está generando: espera a que termine (o detenlo) para duplicarlo.');
     const target = projectId && projectId !== g.projectId ? await this.targetProject(projectId, user) : g.projectId;
+    // Hito 13a (ADR-177): en otro proyecto, sin versiones de voz mezcladas; si el destino está en v4, la copia pasa a v4.
+    let toV4: { seed: number; note: string } | undefined;
+    if (target !== g.projectId) {
+      const src = await this.store.get(id);
+      if (src) {
+        toV4 = (await this.voiceProject.check(src, target, 'duplicar')).toV4;
+        if (toV4) this.voiceProject.confirm(toV4.note, confirmed, 'Duplicar');
+      }
+    }
     const newId = await this.copyVideo(id, target, user.id);
+    if (toV4) {
+      const copy = await this.store.get(newId);
+      if (copy) this.voiceProject.toV4(copy, toV4.seed);
+    }
     const [s] = await this.history.summaries([newId]);
     return s;
   }
@@ -125,6 +140,10 @@ export class DuplicateService {
         name: copyName(p.name, taken),
         description: p.description,
         scriptStyleId: p.scriptStyleId,
+        // Voz del proyecto (hito 13a): la misma versión, semilla y velocidad.
+        voiceModel: p.voiceModel,
+        voiceSeed: p.voiceSeed,
+        voiceSpeed: p.voiceSpeed,
         // Logo y ajustes, sin el link del proyecto (T6): el duplicado no se comparte solo.
         delivery: deliveryForCopy(p.delivery),
       },
@@ -214,6 +233,10 @@ export class DuplicateService {
               soundMode: g.soundMode,
               soundGainDb: g.soundGainDb,
               voiceMode: g.voiceMode,
+              voiceModel: g.voiceModel,
+              voiceSeed: g.voiceSeed,
+              voiceSpeed: g.voiceSpeed,
+              syncRule: g.syncRule,
               delivery: deliveryForCopy(r(g.delivery)),
               inserts: j(g.inserts, id, newId),
               script: j(g.script, id, newId),

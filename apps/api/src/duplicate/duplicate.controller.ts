@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import type { AuthUser, DuplicateProjectResponse, GenerationSummary } from '@wilox/shared';
 import { CurrentUser } from '../auth/decorators.js';
@@ -14,9 +14,9 @@ export class DuplicateController {
   /** Duplica el video en su proyecto o en `projectId` (toma el logo de ese proyecto). */
   @Post('generations/:id/duplicate')
   @HttpCode(201)
-  video(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser): Promise<GenerationSummary> {
+  video(@Param('id') id: string, @Body() body: unknown, @Headers('x-confirm-change') confirm: string | undefined, @CurrentUser() user: AuthUser): Promise<GenerationSummary> {
     const { projectId } = VideoSchema.parse(body ?? {});
-    return this.duplicate.duplicateVideo(id, user, projectId);
+    return this.duplicate.duplicateVideo(id, user, projectId, confirm === '1');
   }
 
   /** Duplica el proyecto: sale al instante y sus videos se copian en segundo plano (`ProjectSummary.copying`). */

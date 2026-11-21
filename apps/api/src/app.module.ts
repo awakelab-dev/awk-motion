@@ -46,6 +46,9 @@ import { DuplicateService } from './duplicate/duplicate.service.js';
 import { VideoOrderController } from './projects/video-order.controller.js';
 import { RevoiceBatchController } from './voice/revoice-batch.controller.js';
 import { RevoiceBatchService } from './voice/revoice-batch.service.js';
+import { VoiceProjectService } from './voice/voice-project.service.js';
+import { SpeedService } from './voice/speed.service.js';
+import { SpeedController } from './voice/speed.controller.js';
 import { VoiceTrialController } from './voice/voice-trial.controller.js';
 import { VoiceTrialService } from './voice/voice-trial.service.js';
 import { ProjectShareController } from './share/project-share.controller.js';
@@ -57,7 +60,7 @@ import { BrandController } from './brand/brand.controller.js';
 
 @Module({
   imports: [DbModule, StorageModule, QueueModule, ProvidersModule],
-  controllers: [AppController, BrandController, AuthController, UsersController, ProjectsController, GenerationsController, ThemesController, MusicController, QueueController, PronunciationsController, ImportsController, DeliveryController, CostsController, ScriptStylesController, BatchesController, ReviewController, PublicationsController, TrashController, DuplicateController, VideoOrderController, DownloadLinksController, ProjectShareController, VoiceTrialController, RevoiceBatchController, AccessController],
-  providers: [AccessService, OwnershipService, AuthService, JobsService, HistoryService, DownloadsService, { provide: APP_GUARD, useClass: AuthGuard }, RunStore, MusicService, PipelineService, ThemeStore, StudioService, TypographyService, DeliveryService, ExportsService, PackagesService, BatchesService, ReviewService, ClipAdviceService, PublicationsService, LogoBurnService, TrashService, DuplicateService, ProjectShareService, VoiceTrialService, RevoiceBatchService],
+  controllers: [AppController, BrandController, AuthController, UsersController, ProjectsController, GenerationsController, ThemesController, MusicController, QueueController, PronunciationsController, ImportsController, DeliveryController, CostsController, ScriptStylesController, BatchesController, ReviewController, PublicationsController, TrashController, DuplicateController, VideoOrderController, DownloadLinksController, ProjectShareController, VoiceTrialController, RevoiceBatchController, SpeedController, AccessController],
+  providers: [AccessService, OwnershipService, AuthService, JobsService, HistoryService, DownloadsService, { provide: APP_GUARD, useClass: AuthGuard }, RunStore, MusicService, PipelineService, ThemeStore, StudioService, TypographyService, DeliveryService, ExportsService, PackagesService, BatchesService, ReviewService, ClipAdviceService, PublicationsService, LogoBurnService, TrashService, DuplicateService, ProjectShareService, VoiceTrialService, RevoiceBatchService, VoiceProjectService, SpeedService],
 })
 export class AppModule {}

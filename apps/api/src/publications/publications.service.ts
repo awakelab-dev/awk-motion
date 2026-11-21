@@ -396,7 +396,7 @@ export class PublicationsService implements OnModuleInit, OnModuleDestroy {
    * Antes de mover un video a otro proyecto: siempre se confirma, porque toma el logo del proyecto nuevo (en sus
    * descargas y, si está publicado con logo, en lo que ve el cliente).
    */
-  async guardMove(generationId: string, ownerId: string, to: { id: string; name: string; hasLogo: boolean }, confirmed: boolean): Promise<void> {
+  async guardMove(generationId: string, ownerId: string, to: { id: string; name: string; hasLogo: boolean }, confirmed: boolean, extra?: string): Promise<void> {
     if (confirmed) return;
     const g = await this.db.generation.findFirst({ where: { id: generationId }, select: { projectId: true } });
     if (!g || g.projectId === to.id) return;
@@ -407,8 +407,8 @@ export class PublicationsService implements OnModuleInit, OnModuleDestroy {
       code: 'confirm',
       title: pubs.length ? 'Mover un video publicado' : 'Mover el video',
       message: pubs.length
-        ? `Está publicado (${this.usesText(uses ?? [])}). Al moverlo toma ${logo}${pubs.some((x) => x.logo) ? ': se vuelve a publicar y el cliente verá el cambio de logo en unos minutos' : ''}.`
-        : `Al moverlo toma ${logo} en sus descargas y publicaciones.`,
+        ? `Está publicado (${this.usesText(uses ?? [])}). Al moverlo toma ${logo}${pubs.some((x) => x.logo) ? ': se vuelve a publicar y el cliente verá el cambio de logo en unos minutos' : ''}.` + (extra ? `\n\n${extra}` : '')
+        : `Al moverlo toma ${logo} en sus descargas y publicaciones.` + (extra ? `\n\n${extra}` : ''),
       action: 'Mover',
     });
   }

@@ -11,7 +11,7 @@ import { TrashService } from '../trash/trash.service.js';
 
 /**
  * «Rehacer la locución» de varios videos de un proyecto (hito 10, T5, ADR-135). Cada video marcado hace lo mismo que su
- * botón (ADR-134): toda la locución en un solo pedido a v3, con la misma voz y el mismo texto; los fotogramas y los
+ * botón (ADR-134): toda la locución en un solo pedido a v3 (en un video v4, toda de nuevo por párrafo, hito 13a), con la misma voz y el mismo texto; los fotogramas y los
  * clips no cambian y se rehacen el post y el final. Todos arrancan a la vez: la cola global (ElevenLabs y ffmpeg)
  * ordena el trabajo.
  */
@@ -43,6 +43,7 @@ export class RevoiceBatchService {
         approved: true,
         mode: true,
         voiceMode: true,
+        voiceModel: true,
         finalPath: true,
         finalFrames: true,
         totalFrames: true,
@@ -58,6 +59,7 @@ export class RevoiceBatchService {
       const status = live?.state.status ?? g.status;
       const approved = live?.approved ?? g.approved;
       const voiceMode: VoiceMode = (live?.state.voiceMode ?? g.voiceMode) === 'whole' ? 'whole' : 'paragraph';
+      const voiceModel = (live ? live.state.voiceModel : g.voiceModel) === 'v4' ? 'v4' : 'v3';
       const reason =
         g.mode === 'mcp' || this.providers.mode === 'mcp'
           ? 'Video del modo MCP: la locución en un solo pedido usa la API.'
@@ -75,6 +77,7 @@ export class RevoiceBatchService {
         durationSec: g.durationSec ?? (g.finalFrames ?? g.totalFrames ?? 0) / FPS,
         chars: g.paragraphs.reduce((n, p) => n + (p.spokenText ?? p.text).length, 0),
         voiceMode,
+        voiceModel,
         published: published.has(g.id),
         available: !reason,
         ...(reason ? { reason } : {}),

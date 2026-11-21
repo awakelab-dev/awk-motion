@@ -86,3 +86,9 @@ La estructura probada, en este orden:
 ## Locución en un solo pedido (hito 10, ADR-133)
 - Desde el hito 10 los videos nuevos piden toda la locución a ElevenLabs v3 de una vez y la cortan por párrafos con la alineación (pausas naturales del propio pedido; bloques de párrafos enteros si pasa de 5.000 caracteres). «Rehacer audio» vuelve a pedir toda la locución. Los videos anteriores siguen por párrafo (paso 1 de arriba).
 
+
+## Voz v4 por proyecto (hito 13a, ADR-177)
+- La versión de voz es del proyecto: los nuevos nacen en v4 y los anteriores siguen en v3 (locución entera, arriba). En v4 cada párrafo se pide por separado a `eleven_v4` con el párrafo anterior y el siguiente como contexto y la semilla del proyecto; el audio se recorta a 0,06 s antes de la primera palabra y 0,15 s después de la última, y los párrafos van a 0,6 s de voz a voz. «Rehacer audio» pide solo ese párrafo y lo empalma; el resto del audio queda igual.
+
+## Velocidad de la narración (hito 13a, ADR-178)
+- Cada proyecto tiene su velocidad (0,70–1,15; los nuevos 0,85). La voz se pide a velocidad 1 y cada párrafo se estira con ffmpeg `rubberband` antes de los tiempos por palabra; las pausas entre párrafos no se estiran. «Cambiar velocidad» de un video ya hecho estira la locución actual y rehace el plan, el post y el final, sin pedir voz ni clips.

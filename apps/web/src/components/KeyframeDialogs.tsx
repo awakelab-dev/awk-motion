@@ -187,14 +187,18 @@ export function RevoiceDialog({ run, k, onClose }: { run: RunState; k: KeyframeS
   const send = async () => {
     if (pi === undefined || !para) return;
     // Locución en un solo pedido (ADR-133): se vuelve a pedir toda, para mantener el mismo tono en todos los párrafos.
-    const whole = run.mode !== 'mcp';
+    // Voz v4 (hito 13a, ADR-177): solo este párrafo, con el contexto de sus vecinos y la semilla del video.
+    const v4 = run.voiceModel === 'v4' && run.mode !== 'mcp';
+    const whole = run.mode !== 'mcp' && !v4;
     const allChars = run.paragraphs.reduce((n, p) => n + (p.index === pi ? text.trim().length : (p.spokenText ?? p.text).length), 0);
     const ok = await confirmSpend({
       title: 'Rehacer audio',
-      body: whole
-        ? 'Se vuelve a locutar toda la locución en un solo pedido (con tu corrección), para que el tono siga igual en todos los párrafos; después se rehacen el post y el render (sin clips nuevos).'
-        : 'Se vuelve a locutar el párrafo completo y después se rehacen el post y el render (sin clips nuevos).',
-      work: { ttsChars: whole ? allChars : text.trim().length, llm: instruction.trim() ? 1 : 0 },
+      body: v4
+        ? 'Voz v4: se vuelve a locutar solo este párrafo (con tu corrección), con el contexto de los párrafos vecinos y la misma semilla; el resto del audio no cambia. Después se rehacen el post y el render (sin clips nuevos).'
+        : whole
+          ? 'Se vuelve a locutar toda la locución en un solo pedido (con tu corrección), para que el tono siga igual en todos los párrafos; después se rehacen el post y el render (sin clips nuevos).'
+          : 'Se vuelve a locutar el párrafo completo y después se rehacen el post y el render (sin clips nuevos).',
+      work: v4 ? { ttsV4Chars: text.trim().length, llm: instruction.trim() ? 1 : 0 } : { ttsChars: whole ? allChars : text.trim().length, llm: instruction.trim() ? 1 : 0 },
       action: 'Rehacer audio',
     });
     if (!ok) return;

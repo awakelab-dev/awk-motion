@@ -90,7 +90,7 @@ export class OwnershipService {
     if (to.id === from.id) throw new BadRequestException('Elige otro usuario.');
     const projects = await this.db.project.findMany({ where: { ownerId: from.id, deletedAt: null, system: null }, select: { id: true } });
     const ids = projects.map((p) => p.id);
-    const unclassified = await this.db.project.findFirst({ where: { ownerId: from.id, system: { not: null } }, select: { id: true } });
+    const unclassified = await this.db.project.findFirst({ where: { ownerId: from.id, system: { not: null } }, select: { id: true, voiceModel: true, voiceSeed: true, voiceSpeed: true } });
     const loose = unclassified ? await this.db.generation.findMany({ where: { projectId: unclassified.id, deletedAt: null }, select: { id: true } }) : [];
     let unclassifiedProjectId: string | undefined;
     await this.db.$transaction(async (tx) => {
@@ -98,7 +98,15 @@ export class OwnershipService {
       await tx.projectShare.deleteMany({ where: { projectId: { in: ids }, userId: to.id } });
       if (loose.length) {
         const np = await tx.project.create({
-          data: { ownerId: to.id, name: `${UNCLASSIFIED_NAME} de ${label(from)}`.slice(0, 80), description: `Videos que ${label(from)} tenía sin clasificar.` },
+          data: {
+            ownerId: to.id,
+            name: `${UNCLASSIFIED_NAME} de ${label(from)}`.slice(0, 80),
+            description: `Videos que ${label(from)} tenía sin clasificar.`,
+            // La voz de su «Sin clasificar» (hito 13a): los videos no cambian de versión.
+            voiceModel: unclassified?.voiceModel ?? null,
+            voiceSeed: unclassified?.voiceSeed ?? null,
+            voiceSpeed: unclassified?.voiceSpeed ?? null,
+          },
           select: { id: true },
         });
         unclassifiedProjectId = np.id;

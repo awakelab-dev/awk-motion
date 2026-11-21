@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, type BeforeApplicationShutdown, type OnApplicationBootstrap } from '@nestjs/common';
+import { randomInt } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import pLimit from 'p-limit';
 import { z } from 'zod';
@@ -33,6 +34,7 @@ import {
   type VoiceTrialVariant,
   type VoiceTrialSettings,
   type KeyframeMediaFrame,
+  V4_MAX_CHARS,
 } from '@wilox/shared';
 import {
   clipVideoPrompt,
@@ -80,6 +82,8 @@ import {
   videoFrameAt,
   voiceWithGaps,
   editSilence,
+  trimPadAudio,
+  stretchAudio,
 } from '../media/ffmpeg.js';
 import { motionCurve, motionPeaks } from '../media/motion.js';
 import { planSfx, renderSfx } from '../media/sfx.js';
@@ -109,6 +113,9 @@ import {
 } from '../voice/pronunciation.js';
 import { splitParagraphs, tokenize } from './text.js';
 import { nextTextFor, splitWholeVoice } from '../voice/voice-trial.js';
+import { keepGapStarts, shiftWords, v4Context, v4Starts, v4TrimWindow, v4WavGap } from '../voice/v4.js';
+import { rescaleWords, respace, sameSpeed, scaleRelative, shiftedClips, speedRatio, speedText } from '../voice/speed.js';
+import type { WordTime } from './align.js';
 import { pickSplitPoint, shiftIndexName, SPLIT_MIN_FRAMES, type SplitPoint } from './split.js';
 import { planPause } from './pause.js';
 import { renumberForSplit } from '../persistence/run-split.js';
@@ -502,7 +509,20 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     }
   }
 
+  /**
+   * Locución de un video nuevo: se pide a la voz (v4, v3 en un solo pedido o por párrafo) y, si el video tiene otra
+   * velocidad de narración, se estira (hito 13a, T2, ADR-178). La voz pedida siempre sale a velocidad 1 (los audios por
+   * párrafo se vuelven a sacar de lo recibido), así que tras un reinicio se estira una sola vez.
+   */
   private async voice(rec: RunRecord) {
+    const s = rec.state;
+    const paras = splitParagraphs(s.text);
+    const ready = s.paragraphs.length === paras.length && !!s.totalFrames && !!rec.words?.length && existsSync(join(rec.dir, 'voice', 'voz_completa.wav'));
+    await this.voiceRequest(rec);
+    if (!ready) await this.speedNewVoice(rec);
+  }
+
+  private async voiceRequest(rec: RunRecord) {
     const s = rec.state;
     const paras = splitParagraphs(s.text);
     if (!paras.length) throw new Error('El texto está vacío.');
@@ -516,6 +536,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     // Tono del guion (ADR-049): etiqueta de ElevenLabs v3 al inicio del párrafo ("[excited] …").
     const tag = (i: number) => (s.script?.rows[i]?.voiceTag && this.p.mode !== 'mock' ? `[${s.script.rows[i].voiceTag}] ` : '');
     const spoken = paras.map((t, i) => tag(i) + applyRules(t, rules));
+    if (this.isV4(rec)) return this.voiceV4(rec, paras, spoken);
     if (s.voiceMode === 'whole') return this.voiceWhole(rec, paras, spoken);
     this.step(rec, 'voice', todo ? `Generando la locución (${todo} párrafo${todo > 1 ? 's' : ''})…` : 'Locución ya generada: se retoma.');
     const limit = pLimit(4);
@@ -589,6 +610,371 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     });
     await this.savePrompt(rec, 'locucion_v1.md', ['# Locución · un solo pedido', '', ...r.record, '', '## Enviado a la voz', '', spoken.join('\n\n')].join('\n'));
     this.store.log(rec, `Locución lista en un solo pedido: ${r.endSec.toFixed(2)} s → ${totalFrames} frames.`);
+  }
+
+  // ---------------------------------------------------------------- velocidad de la narración (hito 13a, T2, ADR-178)
+
+  /** Audio del párrafo tal como se monta (`parrafoNN.48k.wav` o, rehecho, `parrafoNN_vN.48k.wav`). */
+  private paraWav(rec: RunRecord, p: { index: number; version?: number }) {
+    return join(rec.dir, 'voice', (p.version ?? 1) > 1 ? `parrafo${nn(p.index + 1)}_v${p.version}.48k.wav` : `parrafo${nn(p.index + 1)}.48k.wav`);
+  }
+
+  /** Estira un audio por `ratio` (velocidad nueva / actual) en un archivo aparte (`…_velocidad.wav`) y devuelve su duración. */
+  private async stretchTo(wav: string, ratio: number): Promise<{ tmp: string; dur: number }> {
+    const tmp = wav.replace(/\.wav$/, '') + '_velocidad.wav';
+    await stretchAudio(wav, ratio, tmp);
+    return { tmp, dur: await durationSec(tmp) };
+  }
+
+  /** Estira un audio en su lugar y devuelve su duración nueva. */
+  private async stretchInPlace(wav: string, ratio: number): Promise<number> {
+    const { tmp, dur } = await this.stretchTo(wav, ratio);
+    await rename(tmp, wav);
+    return dur;
+  }
+
+  /** Velocidad del video nuevo aplicada a la locución recién pedida (fase 1, antes de los tiempos por palabra). */
+  private async speedNewVoice(rec: RunRecord) {
+    const s = rec.state;
+    const speed = s.voiceSpeed ?? 1;
+    if (sameSpeed(speed) || this.p.mode === 'mcp') return;
+    const paras = [...s.paragraphs].sort((a, b) => a.index - b.index);
+    const durs = await Promise.all(paras.map((p) => this.stretchInPlace(this.paraWav(rec, p), speed)));
+    // En v4 la pausa entre párrafos sigue en 0,6 s de voz a voz (los márgenes del audio se estiraron).
+    const starts = respace(paras, durs, this.isV4(rec) ? { from: v4WavGap(1), to: v4WavGap(speed) } : undefined);
+    const end = starts[starts.length - 1] + durs[durs.length - 1];
+    const totalFrames = totalFramesFor(end);
+    const voiceWav = join(rec.dir, 'voice', 'voz_completa.wav');
+    await assembleVoice(paras.map((p, i) => ({ wav: this.paraWav(rec, p), startSec: starts[i] })), totalFrames / FPS, voiceWav);
+    // Los tiempos por palabra de cada párrafo son relativos a su audio: se escalan.
+    if (rec.paraAudio) rec.paraAudio = rec.paraAudio.map((a) => ({ ...a, ...(a.words ? { words: scaleRelative(a.words, speed) } : {}) }));
+    this.store.update(rec, (st) => {
+      st.paragraphs = paras.map((p, i) => ({ ...p, startSec: starts[i], durationSec: durs[i] }));
+      st.durationSec = totalFrames / FPS;
+      st.totalFrames = totalFrames;
+      st.voiceUrl = this.fileUrl(rec, voiceWav, Date.now());
+    });
+    this.store.log(rec, `Velocidad de la narración ${speedText(speed)}: ${end.toFixed(2)} s → ${totalFrames} frames.`);
+  }
+
+  /** Lo que impide cambiar la velocidad de un video ahora (o nada). */
+  speedBlocked(rec: RunRecord): string | undefined {
+    const s = rec.state;
+    if (rec.busy) return 'Está trabajando.';
+    if (this.p.mode === 'mcp' || s.mode === 'mcp') return 'Solo en modo API.';
+    const done = s.status === 'done' && rec.approved;
+    if (s.status !== 'awaiting_approval' && !done) return 'Aún no está terminado.';
+    if (s.keyframes.some((k) => k.status === 'generating' || k.activity)) return 'Hay regeneraciones en curso.';
+    if (!rec.words?.length || !rec.shots?.length || !rec.plan || !s.paragraphs.length) return 'Faltan los tiempos o el plan.';
+    return undefined;
+  }
+
+  /**
+   * «Cambiar velocidad» de un video ya hecho (ADR-178): sin pedir voz ni clips. Se estira la locución actual (cada párrafo,
+   * por la razón velocidad nueva / actual), se escalan los tiempos por palabra, se recalcula el plan con los mismos planos
+   * (más lenta = más congelado; más rápida = menos) y, si estaba terminado, se rehacen el post y el final. Si con la voz
+   * más rápida algún plano no cabe, no se aplica nada.
+   */
+  changeSpeed(rec: RunRecord, speed: number) {
+    const why = this.speedBlocked(rec);
+    if (why) throw new Error(why);
+    const s = rec.state;
+    const ratio = speedRatio(speed, s.voiceSpeed ?? 1);
+    if (sameSpeed(ratio)) throw new Error(`El video ya está a velocidad ${speedText(speed)}.`);
+    const done = s.status === 'done' && rec.approved;
+    this.guard(rec, async () => {
+      const before = s.status;
+      try {
+        await this.changeSpeedInner(rec, speed, ratio, before, done);
+      } catch (e) {
+        if (rec.state.status !== 'voice') throw e; // ya se aplicó: el error es del post o del render
+        const msg = (e as Error).message;
+        this.store.log(rec, `No se pudo cambiar la velocidad: ${msg}`, 'warn');
+        this.store.update(rec, (st) => ((st.status = before), (st.message = `No se pudo cambiar la velocidad: ${msg.split('\n')[0]}`)));
+      }
+    });
+  }
+
+  private async changeSpeedInner(rec: RunRecord, speed: number, ratio: number, before: RunState['status'], done: boolean) {
+    const s = rec.state;
+    const from = s.voiceSpeed ?? 1;
+    this.step(rec, 'voice', `Cambiando la velocidad de la narración (${speedText(from)} → ${speedText(speed)})…`);
+    const paras = [...s.paragraphs].sort((a, b) => a.index - b.index);
+    const wavs = paras.map((p) => this.paraWav(rec, p));
+    await this.media.ensure(...wavs);
+    const out = await Promise.all(wavs.map((w) => this.stretchTo(w, ratio)));
+    const durs = out.map((o) => o.dur);
+    const starts = respace(paras, durs, this.isV4(rec) ? { from: v4WavGap(from), to: v4WavGap(speed) } : undefined);
+    const totalFrames = totalFramesFor(starts[starts.length - 1] + durs[durs.length - 1]);
+    const words = rescaleWords(rec.words!, paras.map((p) => p.startSec), starts, ratio);
+    const paragraphs = paras.map((p, i) => ({ ...p, startSec: starts[i], durationSec: durs[i] }));
+    const plan = planShots(words, rec.shots!, paragraphs, totalFrames);
+    if (plan.length !== rec.shots!.length) {
+      await Promise.all(out.map((o) => rm(o.tmp, { force: true })));
+      throw new Error(`A velocidad ${speedText(speed)} no caben todos los planos (${plan.length} de ${rec.shots!.length}); no se aplicó. Prueba una velocidad más lenta.`);
+    }
+    const shifted = shiftedClips(words, rec.shots!.map((sh) => sh.anchorWordIndex), paragraphs, plan);
+
+    // Se aplica: audios de los párrafos, voz completa, tiempos y plan (los fotogramas y los clips no cambian).
+    for (const [i, o] of out.entries()) await rename(o.tmp, wavs[i]);
+    const voiceWav = join(rec.dir, 'voice', 'voz_completa.wav');
+    await assembleVoice(paras.map((_, i) => ({ wav: wavs[i], startSec: starts[i] })), totalFrames / FPS, voiceWav);
+    const durBefore = s.durationSec ?? 0;
+    rec.words = words;
+    rec.plan = plan;
+    rec.paraAudio = undefined;
+    this.store.update(rec, (st) => {
+      st.paragraphs = paragraphs;
+      st.totalFrames = totalFrames;
+      st.durationSec = totalFrames / FPS;
+      st.voiceUrl = this.fileUrl(rec, voiceWav, Date.now());
+      st.clips.forEach((c, i) => ((c.startFrame = plan[i].startFrame), (c.slotEndFrame = plan[i].slotEndFrame)));
+      st.finalUrl = undefined;
+      st.finalFrames = undefined;
+      st.voiceSpeed = sameSpeed(speed) ? undefined : speed;
+    });
+    await this.savePrompt(rec, 'tiempos_por_palabra.json', JSON.stringify(words, null, 1));
+    await this.savePrompt(rec, 'plan.json', JSON.stringify(plan.map((pl, i) => ({ clip: `clip${nn(i + 1)}`, pfc: rec.shots![i].pfc, layout: rec.shots![i].keyframe.layout, ...pl })), null, 2));
+    this.store.log(
+      rec,
+      `Velocidad ${speedText(from)} → ${speedText(speed)}: ${(totalFrames / FPS).toFixed(2)} s (antes ${durBefore.toFixed(2)} s), sin voz ni clips nuevos.` +
+        (shifted.length ? ` ${shifted.length === 1 ? 'El clip' : 'Los clips'} ${shifted.map((i) => i + 1).join(', ')} ${shifted.length === 1 ? 'empieza' : 'empiezan'} algo después de su palabra clave (el anterior aún no terminaba).` : ''),
+      shifted.length ? 'warn' : 'info',
+    );
+    if (done) {
+      this.step(rec, 'post', 'Velocidad cambiada: se rehacen el post y el render (sin regenerar clips)…');
+      await this.post(rec);
+    } else if (before === 'awaiting_approval') {
+      this.step(rec, 'awaiting_approval', 'Velocidad cambiada. Revisa los fotogramas y aprueba cuando estés conforme.');
+      this.reviewMessage(rec);
+    }
+  }
+
+  // ---------------------------------------------------------------- voz v4 (hito 13a, ADR-177)
+
+  /** El video se locuta con la voz v4 (por párrafo, con contexto y semilla). En MCP (Higgsfield) siempre v3. */
+  isV4(rec: RunRecord): boolean {
+    return rec.state.voiceModel === 'v4' && this.p.mode !== 'mcp';
+  }
+
+  /** Semilla de la voz v4 del video (si faltara, se elige al azar y queda guardada). */
+  private v4Seed(rec: RunRecord): number {
+    let seed = rec.state.voiceSeed;
+    if (seed === undefined) {
+      seed = randomInt(0, 2 ** 31 - 1);
+      const s2 = seed;
+      this.store.update(rec, (st) => (st.voiceSeed = s2));
+    }
+    return seed;
+  }
+
+  /**
+   * Pide a la voz v4 los párrafos `which` (en paralelo; la cola de ElevenLabs ordena el trabajo): cada uno con el final del
+   * párrafo anterior y el comienzo del siguiente como contexto (`previous_text`/`next_text`) y la semilla. Su audio queda
+   * recortado (`<base>.48k.wav`, con el margen fijo de v4 antes y después de la voz) y sus palabras alineadas al texto del
+   * video. Punto de control por párrafo (`<base>.tts.json`): tras un reinicio no se paga dos veces.
+   */
+  private async v4Paragraphs(
+    rec: RunRecord,
+    which: number[],
+    texts: string[],
+    spoken: string[],
+    baseOf: (i: number) => string,
+    seed: number,
+  ): Promise<Map<number, { wav: string; dur: number; words: WordTime[]; audio: TtsResult; record: string }>> {
+    const model = env.ELEVENLABS_V4_MODEL;
+    const voiceId = rec.state.voiceId;
+    for (const i of which)
+      if (spoken[i].length > V4_MAX_CHARS) throw new Error(`El párrafo ${i + 1} tiene ${spoken[i].length} caracteres: un pedido a la voz v4 admite hasta ${V4_MAX_CHARS}.`);
+    const limit = pLimit(4);
+    const out = new Map<number, { wav: string; dur: number; words: WordTime[]; audio: TtsResult; record: string }>();
+    await Promise.all(
+      which.map((i) =>
+        limit(async () => {
+          const base = baseOf(i);
+          const ctx = v4Context(spoken, i);
+          const meta = `${base}.tts.json`;
+          let audio: TtsResult | undefined;
+          try {
+            const m = JSON.parse(await readFile(meta, 'utf8')) as { text: string; ctx: unknown; seed: number; model: string; voiceId: string; result: TtsResult };
+            const path = isAbsolute(m.result.path) ? m.result.path : join(rec.dir, m.result.path);
+            if (m.text === spoken[i] && JSON.stringify(m.ctx) === JSON.stringify(ctx) && m.seed === seed && m.model === model && m.voiceId === voiceId && existsSync(path)) audio = { ...m.result, path };
+          } catch {
+            // sin punto de control: se pide
+          }
+          if (!audio) {
+            audio = await this.p.tts.synthesize(spoken[i], voiceId, base, { model, seed, ...ctx });
+            await writeFile(meta, JSON.stringify({ text: spoken[i], ctx, seed, model, voiceId, result: { ...audio, path: relative(rec.dir, audio.path) } }, null, 1));
+          }
+          if (!audio.words?.length) throw new Error(`La voz v4 no devolvió los tiempos por palabra del párrafo ${i + 1}.`);
+          const raw = `${base}.raw.48k.wav`;
+          await toWav48k(audio.path, raw);
+          const total = await durationSec(raw);
+          const aligned = alignWords(tokenize(texts[i]), audio.words, total);
+          const win = v4TrimWindow(aligned, total);
+          const wav = `${base}.48k.wav`;
+          await trimPadAudio(raw, win, wav);
+          const dur = await durationSec(wav);
+          const record = [
+            `Párrafo ${i + 1}: request_id ${audio.jobId ?? '—'} · ${spoken[i].length} caracteres · semilla ${seed}`,
+            `  recorte ${win.start.toFixed(3)}–${win.end.toFixed(3)} s de ${total.toFixed(3)} s → ${dur.toFixed(3)} s`,
+            ctx.previousText ? `  previous_text: …${ctx.previousText.slice(-120)}` : '',
+            ctx.nextText ? `  next_text: ${ctx.nextText.slice(0, 120)}…` : '',
+          ]
+            .filter(Boolean)
+            .join('\n');
+          out.set(i, { wav, dur, words: shiftWords(aligned, win), audio, record });
+        }),
+      ),
+    );
+    return out;
+  }
+
+  /** Locución de un video nuevo en v4: un pedido por párrafo y 0,6 s de voz a voz entre párrafos. */
+  private async voiceV4(rec: RunRecord, paras: string[], spoken: string[]) {
+    this.step(rec, 'voice', `Generando la locución v4 (${paras.length} párrafo${paras.length > 1 ? 's' : ''})…`);
+    const vdir = join(rec.dir, 'voice');
+    const seed = this.v4Seed(rec);
+    const parts = await this.v4Paragraphs(rec, paras.map((_, i) => i), paras, spoken, (i) => join(vdir, `parrafo${nn(i + 1)}`), seed);
+    const list = paras.map((_, i) => parts.get(i)!);
+    const starts = v4Starts(list.map((p) => p.dur));
+    const end = starts[starts.length - 1] + list[list.length - 1].dur;
+    const totalFrames = totalFramesFor(end);
+    const voiceWav = join(vdir, 'voz_completa.wav');
+    await assembleVoice(list.map((p, i) => ({ wav: p.wav, startSec: starts[i] })), totalFrames / FPS, voiceWav);
+    // Tiempos de cada párrafo, relativos a su inicio (los toma el paso de tiempos por palabra, como siempre).
+    rec.paraAudio = list.map((p) => ({ ...p.audio, path: p.wav, words: p.words }));
+    this.store.update(rec, (st) => {
+      st.paragraphs = paras.map((text, i) => ({
+        index: i,
+        text,
+        startSec: starts[i],
+        durationSec: list[i].dur,
+        version: 1,
+        spokenText: spoken[i] !== text ? spoken[i] : undefined,
+      }));
+      st.durationSec = totalFrames / FPS;
+      st.totalFrames = totalFrames;
+      st.voiceUrl = this.fileUrl(rec, voiceWav);
+    });
+    await this.savePrompt(rec, 'locucion_v1.md', ['# Locución v4 · por párrafo con contexto', '', ...list.map((p) => p.record), '', '## Enviado a la voz', '', spoken.join('\n\n')].join('\n'));
+    this.store.log(rec, `Locución v4 lista (${paras.length} párrafo${paras.length > 1 ? 's' : ''}): ${end.toFixed(2)} s → ${totalFrames} frames.`);
+  }
+
+  /**
+   * Toda la locución de nuevo en v4 (todos los párrafos, con la misma semilla): «Rehacer la locución» de un video v4 y el
+   * paso de un video v3 a v4 (T3, `toV4`). Los planos se mantienen (mismas palabras), se recalcula el plan y, si el video
+   * estaba terminado, se rehacen el post y el final sin regenerar fotogramas ni clips. Las pausas cambiadas a mano se
+   * pierden (es otra locución).
+   */
+  private async revoiceAllV4(rec: RunRecord, rules: Rule[], before: RunState['status'], done: boolean, seed: number, why: string) {
+    const s = rec.state;
+    const paras = [...s.paragraphs].sort((a, b) => a.index - b.index);
+    const texts = paras.map((p) => p.text);
+    const tag = (i: number) => (s.script?.rows[i]?.voiceTag && this.p.mode !== 'mock' ? `[${s.script.rows[i].voiceTag}] ` : '');
+    const spoken = texts.map((t, i) => tag(i) + applyRules(t, rules));
+    const version = Math.max(...paras.map((p) => p.version ?? 1)) + 1;
+    const vdir = join(rec.dir, 'voice');
+    this.step(rec, 'voice', `${why}: locución v4 por párrafo (${paras.length})…`);
+    const parts = await this.v4Paragraphs(rec, paras.map((_, i) => i), texts, spoken, (i) => join(vdir, `parrafo${nn(i + 1)}_v${version}`), seed);
+    const list = paras.map((_, i) => parts.get(i)!);
+    // A la velocidad del video (ADR-178).
+    const speed = s.voiceSpeed ?? 1;
+    if (!sameSpeed(speed))
+      for (const p of list) {
+        p.dur = await this.stretchInPlace(p.wav, speed);
+        p.words = scaleRelative(p.words, speed);
+      }
+    const starts = v4Starts(list.map((p) => p.dur), speed);
+    const totalFrames = totalFramesFor(starts[starts.length - 1] + list[list.length - 1].dur);
+
+    // Mismas palabras en cada párrafo: las anclas de los planos pasan tal cual (por si la alineación diera otra cuenta, se acota).
+    const oldWords = rec.words!;
+    const words: TimedWord[] = [];
+    const indexMap: number[] = [];
+    paras.forEach((p, i) => {
+      const firstOld = oldWords.findIndex((w) => w.paragraph === p.index);
+      const oldCount = oldWords.filter((w) => w.paragraph === p.index).length;
+      const offset = words.length;
+      const mine = alignWords(tokenize(p.text), list[i].words, list[i].dur);
+      for (const w of mine) words.push({ word: w.word, start: w.start + starts[i], end: w.end + starts[i], paragraph: p.index });
+      for (let k = 0; k < oldCount; k++) indexMap[firstOld + k] = offset + Math.min(k, mine.length - 1);
+    });
+    const shots = rec.shots!.map((sh, i) => ({ ...sh, anchorWordIndex: i === 0 ? 0 : Math.min(words.length - 1, indexMap[sh.anchorWordIndex] ?? sh.anchorWordIndex) }));
+    const paragraphs = paras.map((p, i) => ({ ...p, startSec: starts[i], durationSec: list[i].dur, version, spokenText: spoken[i] !== texts[i] ? spoken[i] : undefined }));
+    const plan = planShots(words, shots, paragraphs, totalFrames);
+    if (plan.length !== shots.length) throw new Error(`Con la locución v4 no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó.`);
+
+    const voiceWav = join(vdir, 'voz_completa.wav');
+    await assembleVoice(list.map((p, i) => ({ wav: p.wav, startSec: starts[i] })), totalFrames / FPS, voiceWav);
+    const durBefore = s.durationSec ?? 0;
+    rec.words = words;
+    rec.shots = shots;
+    rec.plan = plan;
+    rec.paraAudio = undefined;
+    this.store.update(rec, (st) => {
+      st.paragraphs = paragraphs;
+      st.totalFrames = totalFrames;
+      st.durationSec = totalFrames / FPS;
+      st.voiceUrl = this.fileUrl(rec, voiceWav, Date.now());
+      st.clips.forEach((c, i) => ((c.startFrame = plan[i].startFrame), (c.slotEndFrame = plan[i].slotEndFrame)));
+      st.finalUrl = undefined;
+      st.finalFrames = undefined;
+      st.voiceModel = 'v4';
+      st.voiceSeed = seed;
+      st.voiceMode = 'paragraph';
+    });
+    await this.savePrompt(
+      rec,
+      `locucion_v${version}.md`,
+      [`# Locución v${version} · v4 por párrafo con contexto (${why})`, '', ...list.map((p) => p.record), '', '## Enviado a la voz', '', spoken.join('\n\n')].join('\n'),
+    );
+    await this.savePrompt(rec, 'tiempos_por_palabra.json', JSON.stringify(words, null, 1));
+    await this.savePrompt(rec, 'plan.json', JSON.stringify(plan.map((pl, i) => ({ clip: `clip${nn(i + 1)}`, pfc: shots[i].pfc, layout: shots[i].keyframe.layout, ...pl })), null, 2));
+    this.store.log(rec, `Locución v${version} en v4 (${why}): ${(totalFrames / FPS).toFixed(2)} s en total (antes ${durBefore.toFixed(2)} s).`);
+    if (done) {
+      this.step(rec, 'post', 'Locución rehecha: se rehacen el post y el render (sin regenerar clips)…');
+      await this.post(rec);
+    } else if (before === 'awaiting_approval') {
+      this.step(rec, 'awaiting_approval', 'Locución rehecha. Revisa los fotogramas y aprueba cuando estés conforme.');
+      this.reviewMessage(rec);
+    }
+  }
+
+  /** Lo que impide rehacer la locución entera de un video ahora (o nada). */
+  revoiceBlocked(rec: RunRecord): string | undefined {
+    const s = rec.state;
+    if (rec.busy) return 'Está trabajando.';
+    if (this.p.mode === 'mcp') return 'Solo en modo API.';
+    const done = s.status === 'done' && rec.approved;
+    if (s.status !== 'awaiting_approval' && !done) return 'Aún no está terminado.';
+    if (s.keyframes.some((k) => k.status === 'generating' || k.activity)) return 'Hay regeneraciones en curso.';
+    if (!rec.words?.length || !rec.shots?.length || !rec.plan) return 'Faltan los tiempos o el plan.';
+    return undefined;
+  }
+
+  /**
+   * Pasa un video v3 a la voz v4 (hito 13a, ADR-177; lo usan «Pasar a v4» del proyecto y mover o duplicar un video a un
+   * proyecto en v4): toda su locución de nuevo en v4 por párrafo, con la semilla del proyecto. Sin fotogramas ni clips
+   * nuevos. Si falla, el video queda como estaba (en v3).
+   */
+  toV4(rec: RunRecord, seed: number) {
+    if (rec.state.voiceModel === 'v4') throw new Error('El video ya está en v4.');
+    const why = this.revoiceBlocked(rec);
+    if (why) throw new Error(why);
+    const s = rec.state;
+    const done = s.status === 'done' && rec.approved;
+    this.guard(rec, async () => {
+      const before = s.status;
+      try {
+        await this.revoiceAllV4(rec, await this.rulesFor(rec.ownerId), before, done, seed, 'Pasar a v4');
+      } catch (e) {
+        if (rec.state.status !== 'voice') throw e;
+        const msg = (e as Error).message;
+        this.store.log(rec, `No se pudo pasar a v4: ${msg}`, 'warn');
+        this.store.update(rec, (st) => ((st.status = before), (st.message = `No se pudo pasar a v4: ${msg.split('\n')[0]}`)));
+      }
+    });
   }
 
   private async timings(rec: RunRecord) {
@@ -1330,27 +1716,51 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       const rules = [...saved.filter((r) => !extra.some((x) => x.match.toLowerCase() === r.match.toLowerCase())), ...extra];
       // Locución en un solo pedido (ADR-133, ADR-134): se vuelve a pedir toda, también en los videos que se locutaron por
       // párrafo (así se corrigen sus cambios de tono). En MCP (Higgsfield, sin tiempos por carácter), por párrafo.
-      if (!this.voiceByParagraph()) return this.revoiceWhole(rec, index, text, rules, instruction, explanation, before, done);
-      const tagged = s.script?.rows[index]?.voiceTag && this.p.mode !== 'mock' ? `[${s.script.rows[index].voiceTag}] ` : '';
-      const spoken = tagged + applyRules(text, rules);
+      // Voz v4 (hito 13a, ADR-177): solo este párrafo, con su contexto y la semilla del video; el resto queda igual.
+      const v4 = this.isV4(rec);
+      if (!this.voiceByParagraph() && !v4) return this.revoiceWhole(rec, index, text, rules, instruction, explanation, before, done);
+      const tagOf = (i: number) => (s.script?.rows[i]?.voiceTag && this.p.mode !== 'mock' ? `[${s.script.rows[i].voiceTag}] ` : '');
+      const spoken = tagOf(index) + applyRules(text, rules);
       const version = (para.version ?? 1) + 1;
       const base = join(rec.dir, 'voice', `parrafo${nn(index + 1)}_v${version}`);
-      const audio = await this.p.tts.synthesize(spoken, s.voiceId, base);
+      let audio: TtsResult;
+      let wav: string;
+      let dur: number;
+      let heard: WordTime[];
+      let v4Record = '';
+      if (v4) {
+        const sorted = [...s.paragraphs].sort((a, b) => a.index - b.index);
+        const texts = sorted.map((p) => (p.index === index ? text : p.text));
+        const spokenAll = texts.map((t, i) => (i === index ? spoken : tagOf(i) + applyRules(t, rules)));
+        const part = (await this.v4Paragraphs(rec, [index], texts, spokenAll, () => base, this.v4Seed(rec))).get(index)!;
+        ({ audio, wav, dur } = part);
+        heard = part.words;
+        v4Record = part.record;
+      } else {
+        audio = await this.p.tts.synthesize(spoken, s.voiceId, base);
+        wav = `${base}.48k.wav`;
+        await toWav48k(audio.path, wav);
+        dur = await durationSec(wav);
+        heard = await this.p.timing.wordTimes(tokenize(text), audio, dur);
+      }
+      // A la velocidad del video (ADR-178).
+      const speed = s.voiceSpeed ?? 1;
+      if (!sameSpeed(speed) && this.p.mode !== 'mcp') {
+        dur = await this.stretchInPlace(wav, speed);
+        heard = scaleRelative(heard, speed);
+      }
       await this.savePrompt(
         rec,
         `parrafo${nn(index + 1)}_locucion_v${version}.md`,
-        [`# Párrafo ${index + 1} · locución v${version}`, '', `Texto: ${text}`, `Enviado a la voz: ${spoken}`, instruction ? `Indicación: ${instruction}` : '', explanation ? `Opus: ${explanation}` : '']
+        [`# Párrafo ${index + 1} · locución v${version}${v4 ? ' (v4, solo este párrafo)' : ''}`, '', `Texto: ${text}`, `Enviado a la voz: ${spoken}`, instruction ? `Indicación: ${instruction}` : '', explanation ? `Opus: ${explanation}` : '', v4Record]
           .filter(Boolean)
           .join('\n'),
       );
-      const wav = `${base}.48k.wav`;
-      await toWav48k(audio.path, wav);
-      const dur = await durationSec(wav);
-      const heard = await this.p.timing.wordTimes(tokenize(text), audio, dur);
 
-      // Nueva línea de tiempo: los demás párrafos conservan su audio y sus tiempos (desplazados).
+      // Nueva línea de tiempo: los demás párrafos conservan su audio y sus tiempos (desplazados). En v4 se conservan
+      // también las pausas entre párrafos (0,6 s, o la que se cambió a mano).
       const durs = s.paragraphs.map((p) => (p.index === index ? dur : p.durationSec));
-      const starts = paragraphStarts(durs);
+      const starts = v4 ? keepGapStarts([...s.paragraphs].sort((a, b) => a.index - b.index), durs, s.voiceSpeed ?? 1) : paragraphStarts(durs);
       const end = starts[starts.length - 1] + durs[durs.length - 1];
       const totalFrames = totalFramesFor(end);
       const oldWords = rec.words!;
@@ -1391,7 +1801,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
         totalFrames / FPS,
         voiceWav,
       );
-      await this.saveVoice(rec, index, text, spoken, audio);
+      if (!v4) await this.saveVoice(rec, index, text, spoken, audio);
       rec.words = words;
       rec.shots = shots;
       rec.plan = plan;
@@ -1707,7 +2117,8 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     this.guard(rec, async () => {
       const before = s.status;
       try {
-        await this.revoiceWhole(rec, null, '', await this.rulesFor(rec.ownerId), undefined, '', before, done);
+        if (this.isV4(rec)) await this.revoiceAllV4(rec, await this.rulesFor(rec.ownerId), before, done, this.v4Seed(rec), 'Rehacer la locución');
+        else await this.revoiceWhole(rec, null, '', await this.rulesFor(rec.ownerId), undefined, '', before, done);
       } catch (e) {
         if (rec.state.status !== 'voice') throw e; // ya se aplicó: el error es del post o del render
         const msg = (e as Error).message;
@@ -1733,6 +2144,17 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const vdir = join(rec.dir, 'voice');
     this.step(rec, 'voice', 'Rehaciendo toda la locución en un solo pedido…');
     const r = await this.wholeVoice(rec, { texts, spoken, base: join(vdir, `locucion_v${version}`), wavOf: (i) => join(vdir, `parrafo${nn(i + 1)}_v${version}.48k.wav`) });
+    // A la velocidad del video (ADR-178): cada párrafo se estira y sus palabras se escalan; los silencios entre párrafos quedan.
+    const speed = s.voiceSpeed ?? 1;
+    if (!sameSpeed(speed)) {
+      const old = r.parts.map((p) => ({ startSec: p.startSec, durationSec: p.dur }));
+      const durs = await Promise.all(r.parts.map((p) => this.stretchInPlace(p.wav, speed)));
+      const starts = respace(old, durs);
+      const moved = rescaleWords(r.words.map((w) => ({ ...w, paragraph: w.pos })), old.map((o) => o.startSec), starts, speed);
+      r.words = moved.map((w) => ({ word: w.word, start: w.start, end: w.end, pos: w.paragraph }));
+      r.parts = r.parts.map((p, i) => ({ ...p, startSec: starts[i], dur: durs[i] }));
+      r.endSec = starts[starts.length - 1] + durs[durs.length - 1];
+    }
     const totalFrames = totalFramesFor(r.endSec);
 
     // Palabras nuevas y anclas de los planos: los demás párrafos tienen las mismas palabras (mismo orden); el corregido

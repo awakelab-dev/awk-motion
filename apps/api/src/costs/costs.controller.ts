@@ -1,6 +1,7 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import type { Db } from '@wilox/db';
-import type { CostUnit, CostUnits } from '@wilox/shared';
+import { V4_CREDITS_PER_CHAR, type CostUnit, type CostUnits } from '@wilox/shared';
+import { env } from '../config/env.js';
 import { DB } from '../db/db.module.js';
 import { PROVIDERS, type Providers } from '../providers/ports.js';
 
@@ -22,24 +23,35 @@ export class CostsController {
   async units(): Promise<CostUnits> {
     const mode = this.providers.mode;
     if (mode === 'mock') return { mode };
+    // La voz v4 (hito 13a) cobra otra tarifa por carácter: va aparte (kind 'tts4').
+    const v4 = env.ELEVENLABS_V4_MODEL;
     const rows = await this.db.$queryRaw<{ kind: string; n: bigint; usd: number | null; chars: number | null }[]>`
-      SELECT kind::text AS kind, count(*) AS n, sum("costUsd")::float8 AS usd,
+      SELECT CASE WHEN kind = 'tts' AND model = ${v4} THEN 'tts4' ELSE kind::text END AS kind, count(*) AS n, sum("costUsd")::float8 AS usd,
              sum(CASE WHEN usage ? 'characters' THEN (usage->>'characters')::float8 END) AS chars
       FROM "GenerationJob"
       WHERE status = 'succeeded' AND "costUsd" IS NOT NULL AND "costUsd" > 0 AND provider NOT IN ('mock', 'higgsfield')
         AND "startedAt" > now() - interval '90 days'
-      GROUP BY kind`;
+      GROUP BY 1`;
     const avg = (kind: string): CostUnit | undefined => {
       const r = rows.find((x) => x.kind === kind);
       return r && r.usd ? { usd: round(r.usd / Number(r.n)), samples: Number(r.n) } : undefined;
     };
     const tts = rows.find((x) => x.kind === 'tts');
+    const tts4 = rows.find((x) => x.kind === 'tts4');
+    const tts1k = tts?.usd && tts.chars ? { usd: round((tts.usd / tts.chars) * 1000), samples: Number(tts.n) } : undefined;
     return {
       mode,
       llm: avg('llm'),
       image: avg('image'),
       clip: avg('video'),
-      tts1k: tts?.usd && tts.chars ? { usd: round((tts.usd / tts.chars) * 1000), samples: Number(tts.n) } : undefined,
+      tts1k,
+      // Sin locuciones v4 medidas: la tarifa de v3 por la razón medida al planificar (240 créditos por 495 caracteres).
+      tts1kV4:
+        tts4?.usd && tts4.chars
+          ? { usd: round((tts4.usd / tts4.chars) * 1000), samples: Number(tts4.n) }
+          : tts1k
+            ? { usd: round(tts1k.usd * V4_CREDITS_PER_CHAR), samples: 0 }
+            : undefined,
     };
   }
 }

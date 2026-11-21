@@ -1,5 +1,9 @@
 import { ChangeCancelled, confirmChange } from '@/lib/confirm';
 import type {
+  ProjectVoice,
+  SpeedBatchResponse,
+  SpeedCandidate,
+  VoiceModel,
   BatchCandidate,
   CreateBatchRequest,
   DownloadBatchInfo,
@@ -143,6 +147,11 @@ export const projectsApi = {
   /** «Rehacer la locución» de varios videos (hito 10, T5, ADR-135). */
   revoiceCandidates: (id: string) => req<RevoiceCandidate[]>(`/projects/${id}/revoice`),
   revoice: (id: string, ids: string[]) => req<RevoiceBatchResponse>(`/projects/${id}/revoice`, { method: 'POST', body: JSON.stringify({ ids }) }),
+  /** Velocidad de la narración del proyecto para sus videos nuevos (hito 13a, T2, ADR-178). */
+  setVoice: (id: string, speed: number) => req<ProjectVoice>(`/projects/${id}/voice`, { method: 'PATCH', body: JSON.stringify({ speed }) }),
+  /** «Cambiar velocidad» de varios videos del proyecto (sin pedir voz ni clips). */
+  speedCandidates: (id: string) => req<SpeedCandidate[]>(`/projects/${id}/speed`),
+  speed: (id: string, ids: string[], speed: number) => req<SpeedBatchResponse>(`/projects/${id}/speed`, { method: 'POST', body: JSON.stringify({ ids, speed }) }),
   /** Detener / reanudar todos los videos sin final del proyecto (hito 5, ADR-052). */
   pause: (id: string) => req<{ paused: number }>(`/projects/${id}/pause`, { method: 'POST' }),
   resume: (id: string) => req<{ resumed: number }>(`/projects/${id}/continue`, { method: 'POST' }),
@@ -210,6 +219,11 @@ export const api = {
   moveVideo: (id: string, direction: 'earlier' | 'later') => req<{ swappedWith: string | null }>(`/generations/${id}/order`, { method: 'POST', body: JSON.stringify({ direction }) }),
   /** «Rehacer la locución» en un solo pedido (hito 10, ADR-134). */
   revoiceAll: (id: string) => req<RunState>(`/generations/${id}/revoice-all`, { method: 'POST' }),
+  /** «Cambiar velocidad» de un video (hito 13a, T2, ADR-178): sin pedir voz ni clips. */
+  changeSpeed: (id: string, speed: number) => req<RunState>(`/generations/${id}/speed`, { method: 'POST', body: JSON.stringify({ speed }) }),
+  /** Muestra de la voz a una velocidad (WAV; la frase se pide una vez por voz y versión). */
+  voiceSampleUrl: (o: { voiceId?: string; model: VoiceModel; speed: number }) =>
+    `/api/voice-sample?${new URLSearchParams({ model: o.model, speed: String(o.speed), ...(o.voiceId ? { voiceId: o.voiceId } : {}) })}`,
   /** «Dividir en dos» (hito 10, T3, ADR-130). */
   splitInfo: (id: string, index: number) => req<ClipSplitInfo>(`/generations/${id}/clips/${index}/split`),
   splitClip: (id: string, index: number) => req<RunState>(`/generations/${id}/clips/${index}/split`, { method: 'POST' }),

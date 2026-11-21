@@ -65,6 +65,10 @@ export class ElevenLabsTts implements TtsPort, TimingPort {
     // Enlace con las locuciones anteriores (prueba de voz, ADR-129): ElevenLabs admite hasta 3 request_id.
     if (opts?.previousRequestIds?.length) payload.previous_request_ids = opts.previousRequestIds.slice(-3);
     if (opts?.nextText) payload.next_text = opts.nextText;
+    // Voz v4 (hito 13a, ADR-177): contexto anterior y semilla. ElevenLabs ignora previous_text si también llegan
+    // previous_request_ids: en v4 no se envían.
+    if (opts?.previousText) payload.previous_text = opts.previousText;
+    if (opts?.seed !== undefined) payload.seed = opts.seed;
     // Ajustes de la voz para este pedido (ADR-131); los que no se dan quedan como los tiene la voz.
     const vs = opts?.voiceSettings;
     if (vs && (vs.similarityBoost !== undefined || vs.stability !== undefined))

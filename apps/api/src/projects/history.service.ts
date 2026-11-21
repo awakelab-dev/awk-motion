@@ -1,3 +1,4 @@
+import { voiceOf } from '../voice/project-voice.js';
 import { Inject, Injectable } from '@nestjs/common';
 import { ensureUnclassified, projectRole, searchGenerationIds, type Db, type Prisma } from '@wilox/db';
 import type { AuthUser, GenerationSummary, HistoryQuery, HistoryResponse, HistoryStatus, HistoryTotals, ProjectsResponse, ProjectSummary, RunStatus, SoundMode, VoiceTrialMark } from '@wilox/shared';
@@ -251,6 +252,7 @@ export class HistoryService {
         defaults: list[0]
           ? { theme: list[0].themeKey, voiceId: list[0].voiceId, musicTrack: list[0].musicTrack ?? null, soundMode: (list[0].soundMode as SoundMode | null) ?? 'model' }
           : undefined,
+        voice: voiceOf(p),
         access: {
           role: projectRole(p, this.access.viewer(user), p.shares.some((x) => x.userId === user.id)) ?? 'admin',
           owner: p.owner,

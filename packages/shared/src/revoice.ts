@@ -1,4 +1,5 @@
 import type { VoiceMode } from './types.js';
+import type { VoiceModel } from './voice.js';
 
 /**
  * «Rehacer la locución» de varios videos de un proyecto (hito 10, T5, ADR-135): cada video vuelve a locutarse en un
@@ -13,6 +14,8 @@ export interface RevoiceCandidate {
   chars: number;
   /** Cómo está pedida su locución hoy: 'whole' = un solo pedido; 'paragraph' = por párrafo (los anteriores al hito 10). */
   voiceMode: VoiceMode;
+  /** Versión de su voz (hito 13a): en v4 la locución se pide por párrafo, con contexto y semilla. */
+  voiceModel: VoiceModel;
   published: boolean;
   /** Se puede rehacer ahora (terminado, modo API y sin trabajo en curso). */
   available: boolean;

@@ -47,6 +47,8 @@ import { TrashService } from '../trash/trash.service.js';
 import { AccessService } from '../access/access.service.js';
 import { splitParagraphs } from '../pipeline/text.js';
 import { sendToEnd } from '../projects/video-order.js';
+import { voiceForNewVideo } from '../voice/project-voice.js';
+import { VoiceProjectService } from '../voice/voice-project.service.js';
 
 const PauseSchema = z.object({ afterWord: z.number().int().min(0), deltaSec: z.number().min(-10).max(10) });
 
@@ -143,6 +145,7 @@ export class GenerationsController {
     private readonly themes: ThemeStore,
     @Inject(PROVIDERS) private readonly providers: Providers,
     @Inject(DB) private readonly db: Db,
+    private readonly voiceProject: VoiceProjectService,
     private readonly history: HistoryService,
     private readonly downloads: DownloadsService,
     private readonly music: MusicService,
@@ -287,6 +290,9 @@ export class GenerationsController {
       await copyFile(r.abs, dst);
       references.push({ path: join('referencias', name), ref: r.ref, ...(r.typography ? { typography: true } : {}) });
     }
+    // Voz del proyecto (hito 13a, ADR-177): en v4, por párrafo con la semilla del proyecto; en MCP, siempre v3.
+    const voice = this.providers.mode === 'mcp' ? undefined : await voiceForNewVideo(this.db, o.projectId);
+    const v4 = voice?.model === 'v4';
     const rec = this.store.create(
       {
         id,
@@ -299,7 +305,10 @@ export class GenerationsController {
         soundMode: o.soundMode,
         soundGainDb: o.soundGainDb || undefined,
         // Locución en un solo pedido (ADR-133); en MCP (Higgsfield, sin tiempos por carácter), por párrafo.
-        voiceMode: this.providers.mode === 'mcp' ? 'paragraph' : env.VOICE_MODE,
+        voiceMode: this.providers.mode === 'mcp' || v4 ? 'paragraph' : env.VOICE_MODE,
+        ...(v4 ? { voiceModel: 'v4' as const, voiceSeed: voice.seed } : {}),
+        // Velocidad de la narración del proyecto (T2, ADR-178): se aplica al pedir la voz.
+        ...(voice && Math.abs(voice.speed - 1) > 1e-3 ? { voiceSpeed: voice.speed } : {}),
         script: o.script,
         text: o.text,
         status: 'queued',
@@ -487,13 +496,16 @@ export class GenerationsController {
     if (source.ownerId !== target.ownerId) this.access.requireOwner(source.role, 'move-out');
     // T3c (ADR-105): el video toma el logo del proyecto nuevo; se confirma siempre.
     const hasLogo = !!(target.delivery as { logo?: unknown } | null)?.logo;
-    await this.publications.guardMove(id, user.id, { id: target.id, name: target.name, hasLogo }, confirm === '1');
+    // Hito 13a (ADR-177): sin versiones de voz mezcladas; un video v3 que entra en un proyecto v4 pasa a v4 (con aviso de gasto).
+    const voice = rec.projectId !== projectId ? await this.voiceProject.check(rec, target.id, 'mover') : {};
+    await this.publications.guardMove(id, user.id, { id: target.id, name: target.name, hasLogo }, confirm === '1', voice.toV4?.note);
     const moved = rec.projectId !== projectId;
     rec.projectId = projectId;
     this.store.update(rec, (s) => (s.projectId = projectId));
     await this.store.flush(rec);
     // En el proyecto nuevo queda al final (ADR-162).
     if (moved) await sendToEnd(this.db, id);
+    if (voice.toV4) this.voiceProject.toV4(rec, voice.toV4.seed);
     this.access.forget(); // el video cambió de proyecto: su acceso también
     const [s] = await this.history.summaries([id]);
     return s;
