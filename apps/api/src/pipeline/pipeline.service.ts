@@ -867,7 +867,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
    * estaba terminado, se rehacen el post y el final sin regenerar fotogramas ni clips. Las pausas cambiadas a mano se
    * pierden (es otra locución).
    */
-  private async revoiceAllV4(rec: RunRecord, rules: Rule[], before: RunState['status'], done: boolean, seed: number, why: string) {
+  private async revoiceAllV4(rec: RunRecord, rules: Rule[], before: RunState['status'], done: boolean, seed: number, why: string, speedTo?: number) {
     const s = rec.state;
     const paras = [...s.paragraphs].sort((a, b) => a.index - b.index);
     const texts = paras.map((p) => p.text);
@@ -878,8 +878,8 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     this.step(rec, 'voice', `${why}: locución v4 por párrafo (${paras.length})…`);
     const parts = await this.v4Paragraphs(rec, paras.map((_, i) => i), texts, spoken, (i) => join(vdir, `parrafo${nn(i + 1)}_v${version}`), seed);
     const list = paras.map((_, i) => parts.get(i)!);
-    // A la velocidad del video (ADR-178).
-    const speed = s.voiceSpeed ?? 1;
+    // A la velocidad del video (ADR-178) o, al pasar a v4, a la elegida para el proyecto (T3, ADR-179).
+    const speed = speedTo ?? s.voiceSpeed ?? 1;
     if (!sameSpeed(speed))
       for (const p of list) {
         p.dur = await this.stretchInPlace(p.wav, speed);
@@ -923,6 +923,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       st.voiceModel = 'v4';
       st.voiceSeed = seed;
       st.voiceMode = 'paragraph';
+      st.voiceSpeed = sameSpeed(speed) ? undefined : speed;
     });
     await this.savePrompt(
       rec,
@@ -949,6 +950,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const done = s.status === 'done' && rec.approved;
     if (s.status !== 'awaiting_approval' && !done) return 'Aún no está terminado.';
     if (s.keyframes.some((k) => k.status === 'generating' || k.activity)) return 'Hay regeneraciones en curso.';
+    if (s.clips.some((c) => c.status === 'generating')) return 'Tiene clips en curso.';
     if (!rec.words?.length || !rec.shots?.length || !rec.plan) return 'Faltan los tiempos o el plan.';
     return undefined;
   }
@@ -958,7 +960,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
    * proyecto en v4): toda su locución de nuevo en v4 por párrafo, con la semilla del proyecto. Sin fotogramas ni clips
    * nuevos. Si falla, el video queda como estaba (en v3).
    */
-  toV4(rec: RunRecord, seed: number) {
+  toV4(rec: RunRecord, seed: number, speed?: number) {
     if (rec.state.voiceModel === 'v4') throw new Error('El video ya está en v4.');
     const why = this.revoiceBlocked(rec);
     if (why) throw new Error(why);
@@ -967,7 +969,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     this.guard(rec, async () => {
       const before = s.status;
       try {
-        await this.revoiceAllV4(rec, await this.rulesFor(rec.ownerId), before, done, seed, 'Pasar a v4');
+        await this.revoiceAllV4(rec, await this.rulesFor(rec.ownerId), before, done, seed, 'Pasar a v4', speed);
       } catch (e) {
         if (rec.state.status !== 'voice') throw e;
         const msg = (e as Error).message;

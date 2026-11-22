@@ -10,7 +10,7 @@ const GEN_ID = /^[\w-]{1,80}$/;
 const TTL_MS = 30_000;
 
 /** Lo irreversible del proyecto (punto 5 del hito 11) y compartir: solo el dueño (compartir, también el admin). */
-export type OwnerAction = 'trash' | 'restore' | 'archive' | 'delete' | 'share' | 'move-out';
+export type OwnerAction = 'trash' | 'restore' | 'archive' | 'delete' | 'share' | 'move-out' | 'voice-v4';
 
 const OWNER_ONLY: Record<OwnerAction, string> = {
   trash: 'Solo el dueño del proyecto puede enviarlo a la papelera (o enviar sus videos).',
@@ -19,6 +19,7 @@ const OWNER_ONLY: Record<OwnerAction, string> = {
   delete: 'Solo el dueño del proyecto puede eliminarlo definitivamente.',
   share: 'Solo el dueño del proyecto (o un administrador) puede compartirlo.',
   'move-out': 'Solo el dueño del proyecto puede sacar sus videos hacia un proyecto de otro dueño.',
+  'voice-v4': 'Solo el dueño del proyecto puede pasarlo a la voz v4 (es irreversible y rehace toda la locución).',
 };
 
 export interface ProjectAccessRow {

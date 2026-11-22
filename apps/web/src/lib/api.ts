@@ -1,5 +1,7 @@
 import { ChangeCancelled, confirmChange } from '@/lib/confirm';
 import type {
+  ToV4Response,
+  ToV4Status,
   ProjectVoice,
   SpeedBatchResponse,
   SpeedCandidate,
@@ -152,6 +154,9 @@ export const projectsApi = {
   /** «Cambiar velocidad» de varios videos del proyecto (sin pedir voz ni clips). */
   speedCandidates: (id: string) => req<SpeedCandidate[]>(`/projects/${id}/speed`),
   speed: (id: string, ids: string[], speed: number) => req<SpeedBatchResponse>(`/projects/${id}/speed`, { method: 'POST', body: JSON.stringify({ ids, speed }) }),
+  /** «Pasar a v4» (hito 13a, T3, ADR-179): solo el dueño, irreversible. */
+  v4Status: (id: string) => req<ToV4Status>(`/projects/${id}/v4`),
+  toV4: (id: string, speed: number) => req<ToV4Response>(`/projects/${id}/v4`, { method: 'POST', body: JSON.stringify({ speed }) }),
   /** Detener / reanudar todos los videos sin final del proyecto (hito 5, ADR-052). */
   pause: (id: string) => req<{ paused: number }>(`/projects/${id}/pause`, { method: 'POST' }),
   resume: (id: string) => req<{ resumed: number }>(`/projects/${id}/continue`, { method: 'POST' }),

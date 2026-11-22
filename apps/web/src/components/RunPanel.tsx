@@ -1255,7 +1255,7 @@ function Corrections({
             {busy === 'reopen' ? <Loader2 className="animate-spin" /> : <ImageIcon />} Corregir fotogramas
           </Button>
           <Button size="sm" variant="outline" onClick={() => setEditing((v) => !v)} disabled={!!busy}>
-            <Pencil /> Cambiar el texto
+            <Pencil /> Cambiar texto
           </Button>
           <Button size="sm" variant="outline" onClick={() => onRecreate(run)} disabled={!!busy}>
             <Copy /> Recrear
@@ -1272,17 +1272,17 @@ function Corrections({
           )}
           {run.status === 'done' && rulePlan?.available && (
             <Button size="sm" variant="outline" onClick={() => setRuleOpen((v) => !v)} disabled={!!busy}>
-              <Images /> Animación de las imágenes
+              <Images /> Animación imágenes
             </Button>
           )}
           {run.status === 'done' && run.mode !== 'mcp' && (
             <Button size="sm" variant="outline" onClick={() => void revoiceAll()} disabled={!!busy} title="Toda la locución en un solo pedido, con la misma voz: sin cambios de tono entre párrafos">
-              {busy === 'revoice' ? <Loader2 className="animate-spin" /> : <Mic />} Rehacer la locución
+              {busy === 'revoice' ? <Loader2 className="animate-spin" /> : <Mic />} Rehacer locución
             </Button>
           )}
           {run.status === 'done' && run.mode !== 'mcp' && (
             <Button size="sm" variant="outline" onClick={() => setSpeedOpen((v) => !v)} disabled={!!busy} title="Estira la locución actual a otra velocidad: sin pedir voz ni clips (sin costo)">
-              {busy === 'speed' ? <Loader2 className="animate-spin" /> : <Gauge />} Cambiar velocidad ({speedText(run.voiceSpeed ?? 1)})
+              {busy === 'speed' ? <Loader2 className="animate-spin" /> : <Gauge />} Velocidad ({speedText(run.voiceSpeed ?? 1)})
             </Button>
           )}
         </div>

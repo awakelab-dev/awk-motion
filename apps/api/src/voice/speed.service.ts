@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { existsSync } from 'node:fs';
 import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Db } from '@wilox/db';
-import { clampSpeed, FPS, VOICE_SAMPLE_TEXT, type ProjectVoice, type SpeedBatchResponse, type SpeedCandidate, type VoiceModel } from '@wilox/shared';
+import { clampSpeed, FPS, VOICE_SAMPLE_TEXT, type AuthUser, type ProjectVoice, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status, type VoiceModel } from '@wilox/shared';
+import { AccessService } from '../access/access.service.js';
 import { env, repoPath } from '../config/env.js';
 import { DB } from '../db/db.module.js';
 import { DeliveryService } from '../delivery/delivery.service.js';
@@ -13,17 +14,25 @@ import { PipelineService } from '../pipeline/pipeline.service.js';
 import { PROVIDERS, type Providers } from '../providers/ports.js';
 import { PublicationsService } from '../publications/publications.service.js';
 import { TrashService } from '../trash/trash.service.js';
-import { voiceOf } from './project-voice.js';
+import { projectSeed, voiceOf } from './project-voice.js';
 import { sameSpeed, speedText } from './speed.js';
 
 /**
- * Velocidad de la narración (hito 13a, T2, ADR-178): la del proyecto (para los videos nuevos), la muestra para elegirla y
- * «Cambiar velocidad» de uno o varios videos ya hechos (sin pedir voz ni clips).
+ * Voz del proyecto (hito 13a): la velocidad de la narración (T2, ADR-178: la del proyecto para los videos nuevos, la
+ * muestra para elegirla y «Cambiar velocidad» de uno o varios videos ya hechos, sin pedir voz ni clips) y «Pasar a v4»
+ * un proyecto en v3 (T3, ADR-179).
  */
 @Injectable()
-export class SpeedService {
-  private readonly logger = new Logger('Velocidad');
+export class SpeedService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger('Voz');
   private readonly samples = new Map<string, Promise<string>>();
+  /**
+   * Videos que esperan para pasar a v4 (T3, decisión A: encolados detrás de lo que estén haciendo, sin bloquear): se
+   * revisan cada 20 s y pasan en cuanto se puede. Solo en memoria: tras un reinicio, «Pasar los que faltan» del
+   * proyecto los vuelve a poner (así un video que falla no se cobra una y otra vez sin que nadie lo pida).
+   */
+  private readonly pendingV4 = new Map<string, { projectId: string; seed: number; speed: number }>();
+  private timer?: NodeJS.Timeout;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -32,8 +41,119 @@ export class SpeedService {
     private readonly delivery: DeliveryService,
     private readonly publications: PublicationsService,
     private readonly trash: TrashService,
+    private readonly access: AccessService,
     @Inject(PROVIDERS) private readonly providers: Providers,
   ) {}
+
+  onModuleInit() {
+    this.timer = setInterval(() => void this.tickV4(), 20_000);
+    this.timer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  // ─── Pasar a v4 (T3, ADR-179) ───────────────────────────────────────────────────────────────────────
+
+  /** Videos del proyecto que siguen en v3 (los del modo en que corre la API), en orden de creación. */
+  private async v3Videos(projectId: string) {
+    const rows = await this.db.generation.findMany({
+      where: { projectId, trashedAt: null, deletedAt: null, mode: this.providers.mode },
+      select: { id: true, text: true, voiceModel: true, paragraphs: { select: { text: true, spokenText: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.filter((g) => !this.trash.isHidden(g.id) && (this.store.peek(g.id) ? this.store.peek(g.id)!.state.voiceModel : g.voiceModel) !== 'v4');
+  }
+
+  /** Lo que costaría y qué videos esperarían si se pasa el proyecto a v4 ahora. */
+  async v4Status(projectId: string, user: AuthUser): Promise<ToV4Status> {
+    const access = await this.access.project(projectId, user);
+    const p = await this.db.project.findUnique({ where: { id: projectId }, select: { voiceModel: true, voiceSpeed: true } });
+    if (!p) throw new NotFoundException('Proyecto no encontrado.');
+    const list = await this.v3Videos(projectId);
+    const published = await this.publications.publishedUses(list.map((g) => g.id));
+    const waiting: ToV4Status['waiting'] = [];
+    for (const g of list) {
+      const rec = await this.store.get(g.id);
+      const why = this.pendingV4.has(g.id) ? 'Esperando su turno para pasar a v4.' : rec ? this.pipeline.revoiceBlocked(rec) : 'No se encontró.';
+      if (why) waiting.push({ id: g.id, title: this.delivery.videoTitle(g.text), reason: why });
+    }
+    return {
+      model: voiceOf(p).model,
+      v3Videos: list.length,
+      chars: list.reduce((n, g) => n + g.paragraphs.reduce((m, x) => m + (x.spokenText ?? x.text).length, 0), 0),
+      published: published.size,
+      waiting,
+      canConvert: access.role === 'owner' && this.providers.mode !== 'mcp',
+    };
+  }
+
+  /**
+   * Pasa el proyecto a v4 (solo el dueño; irreversible): el proyecto queda en v4 a la velocidad elegida y la locución de
+   * todos sus videos en v3 se rehace en v4 por párrafo (en la cola, como «Rehacer la locución» de varios). Los que ahora
+   * no se pueden (clips en curso, aún sin terminar) esperan y pasan solos después. Con el proyecto ya en v4, pasa los que
+   * falten.
+   */
+  async toV4(projectId: string, user: AuthUser, speed: number, confirmed: boolean): Promise<ToV4Response> {
+    const access = await this.access.project(projectId, user);
+    this.access.requireOwner(access.role, 'voice-v4');
+    if (this.providers.mode === 'mcp') throw new BadRequestException('La voz v4 usa la API de ElevenLabs (modo API).');
+    const sp = clampSpeed(speed);
+    const list = await this.v3Videos(projectId);
+    const published = await this.publications.publishedUses(list.map((g) => g.id));
+    if (published.size && !confirmed)
+      throw new ConflictException({
+        code: 'confirm',
+        title: published.size === 1 ? 'Hay un video publicado' : `Hay ${published.size} videos publicados`,
+        message: `${published.size === 1 ? 'Uno de los videos está publicado' : `${published.size} de los videos están publicados`}. Al pasarlos a v4, quienes los ven —el curso del cliente— oirán la voz nueva en cuanto termine cada uno.`,
+        action: 'Pasar a v4 de todos modos',
+      });
+    const seed = await projectSeed(this.db, projectId);
+    const p = await this.db.project.update({ where: { id: projectId }, data: { voiceModel: 'v4', voiceSpeed: sp }, select: { voiceModel: true, voiceSpeed: true } });
+    const out: ToV4Response = { started: [], waiting: [], voice: voiceOf(p) };
+    for (const g of list) {
+      const title = this.delivery.videoTitle(g.text);
+      const rec = await this.store.get(g.id);
+      if (!rec) continue;
+      const why = this.pipeline.revoiceBlocked(rec);
+      if (why) {
+        this.pendingV4.set(g.id, { projectId, seed, speed: sp });
+        out.waiting.push({ id: g.id, title, reason: why });
+        continue;
+      }
+      try {
+        this.pipeline.toV4(rec, seed, sp);
+        this.store.log(rec, `Pasar a v4 desde el proyecto (velocidad ${speedText(sp)}).`);
+        out.started.push(g.id);
+      } catch (e) {
+        this.pendingV4.set(g.id, { projectId, seed, speed: sp });
+        out.waiting.push({ id: g.id, title, reason: (e as Error).message });
+      }
+    }
+    this.logger.log(`Proyecto ${projectId} en v4 a ${speedText(sp)}: ${out.started.length} video(s) en marcha, ${out.waiting.length} esperando.`);
+    return out;
+  }
+
+  /** Los que esperaban pasan a v4 en cuanto terminan lo que estaban haciendo. */
+  private async tickV4() {
+    for (const [id, w] of [...this.pendingV4]) {
+      try {
+        const rec = await this.store.get(id);
+        if (!rec || rec.state.voiceModel === 'v4' || rec.projectId !== w.projectId || this.trash.isHidden(id)) {
+          this.pendingV4.delete(id);
+          continue;
+        }
+        if (this.pipeline.revoiceBlocked(rec)) continue;
+        this.pendingV4.delete(id);
+        this.pipeline.toV4(rec, w.seed, w.speed);
+        this.store.log(rec, `Pasar a v4: le tocaba su turno (velocidad ${speedText(w.speed)}).`);
+      } catch (e) {
+        this.pendingV4.delete(id);
+        this.logger.warn(`No se pudo pasar ${id} a v4: ${(e as Error).message}`);
+      }
+    }
+  }
 
   /** Cambia la velocidad del proyecto: vale para sus videos nuevos (los hechos se cambian con «Cambiar velocidad»). */
   async setProjectSpeed(projectId: string, speed: number): Promise<ProjectVoice> {

@@ -71,3 +71,30 @@ export interface SpeedBatchResponse {
 /** Frase de la muestra de voz (una vez por voz y versión; se estira a la velocidad elegida). */
 export const VOICE_SAMPLE_TEXT =
   'Hola, esta es una muestra de la narración. Así sonará la voz en tus videos y micro cápsulas, a la velocidad que elijas para el proyecto.';
+
+/**
+ * «Pasar a v4» un proyecto en v3 (hito 13a, T3, ADR-179): solo el dueño, irreversible. Toda la locución de sus videos se
+ * rehace en v4 por párrafo, a la velocidad elegida, sin fotogramas ni clips nuevos.
+ */
+export interface ToV4Status {
+  /** Versión de voz del proyecto. */
+  model: VoiceModel;
+  /** Videos del proyecto que siguen en v3 (en un proyecto v3, todos). */
+  v3Videos: number;
+  /** Caracteres de voz de esos videos (para el aviso de gasto). */
+  chars: number;
+  /** Cuántos de ellos están publicados (el cliente verá el cambio). */
+  published: number;
+  /** Los que no se pueden pasar ahora: esperan su turno (clips en curso, aún sin terminar…) y pasan solos después. */
+  waiting: { id: string; title: string; reason: string }[];
+  /** Quien pide es el dueño (solo él lo hace). */
+  canConvert: boolean;
+}
+
+export interface ToV4Response {
+  /** Videos que empezaron a pasar a v4. */
+  started: string[];
+  /** Videos que esperan a terminar lo que están haciendo y pasan después, solos. */
+  waiting: { id: string; title: string; reason: string }[];
+  voice: ProjectVoice;
+}

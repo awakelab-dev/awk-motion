@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { VOICE_SPEED_MAX, VOICE_SPEED_MIN, type AuthUser, type ProjectVoice, type RunState, type SpeedBatchResponse, type SpeedCandidate } from '@wilox/shared';
+import { VOICE_SPEED_MAX, VOICE_SPEED_MIN, type AuthUser, type ProjectVoice, type RunState, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status } from '@wilox/shared';
 import { CurrentUser } from '../auth/decorators.js';
 import { speedText } from './speed.js';
 import { SpeedService } from './speed.service.js';
@@ -57,5 +57,20 @@ export class SpeedController {
     const r = BatchSchema.safeParse(body ?? {});
     if (!r.success) throw new BadRequestException('Marca al menos un video y una velocidad válida.');
     return this.speed.start(id, r.data.ids, r.data.speed, confirm === '1');
+  }
+
+  /** «Pasar a v4» (T3, ADR-179): lo que costaría y qué videos esperarían. */
+  @Get('projects/:id/v4')
+  v4Status(@Param('id') id: string, @CurrentUser() user: AuthUser): Promise<ToV4Status> {
+    return this.speed.v4Status(id, user);
+  }
+
+  /** «Pasar a v4» (solo el dueño; irreversible) o, con el proyecto ya en v4, pasar los videos que falten. */
+  @Post('projects/:id/v4')
+  @HttpCode(202)
+  toV4(@Param('id') id: string, @Body() body: unknown, @Headers('x-confirm-change') confirm: string | undefined, @CurrentUser() user: AuthUser): Promise<ToV4Response> {
+    const r = SpeedSchema.safeParse(body ?? {});
+    bad(r);
+    return this.speed.toV4(id, user, r.data!.speed, confirm === '1');
   }
 }

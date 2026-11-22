@@ -1,20 +1,21 @@
-import { Gauge, Globe, Loader2 } from 'lucide-react';
+import { ArrowUpCircle, Gauge, Globe, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import type { ProjectSummary, SpeedBatchResponse, SpeedCandidate } from '@wilox/shared';
+import { VOICE_SPEED_DEFAULT, type ProjectSummary, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status } from '@wilox/shared';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { SpeedPicker, speedText } from '@/components/voice/SpeedPicker';
 import { projectsApi } from '@/lib/api';
 import { ChangeCancelled } from '@/lib/confirm';
+import { confirmSpend } from '@/lib/spend';
 import { cn } from '@/lib/utils';
 
 const fmtDur = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 const same = (a: number, b: number) => Math.abs(a - b) < 1e-3;
 
 /**
- * Voz del proyecto (hito 13a, ADR-177/178): la velocidad de la narración de sus videos nuevos, con la muestra, y
- * «Cambiar velocidad» de los videos ya hechos (sin pedir voz ni clips: sin costo). Al abrir quedan marcados los videos
- * cuya velocidad no es la elegida.
+ * Voz del proyecto (hito 13a, ADR-177/178/179): «Pasar a v4» un proyecto en v3 (solo el dueño, irreversible, con la
+ * velocidad elegida con la muestra), la velocidad de la narración de sus videos nuevos y «Cambiar velocidad» de los
+ * videos ya hechos (sin pedir voz ni clips: sin costo). Al abrir quedan marcados los videos cuya velocidad no es la elegida.
  */
 export function ProjectVoiceDialog({ project, onClose, onChanged }: { project: ProjectSummary; onClose: () => void; onChanged: (p: ProjectSummary) => void }) {
   const voice = project.voice ?? { model: 'v3' as const, speed: 1 };
@@ -25,6 +26,53 @@ export function ProjectVoiceDialog({ project, onClose, onChanged }: { project: P
   const [busy, setBusy] = useState<'save' | 'videos'>();
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<SpeedBatchResponse>();
+  // «Pasar a v4» (T3, ADR-179).
+  const [v4, setV4] = useState<ToV4Status>();
+  const [v4Speed, setV4Speed] = useState(voice.model === 'v4' ? voice.speed : VOICE_SPEED_DEFAULT);
+  const [v4Result, setV4Result] = useState<ToV4Response>();
+  const [v4Busy, setV4Busy] = useState(false);
+  useEffect(() => {
+    projectsApi.v4Status(project.id).then(setV4, () => undefined);
+  }, [project.id, v4Result]);
+  useEffect(() => {
+    setSaved(voice.speed);
+    setSpeed(voice.speed);
+  }, [voice.model, voice.speed]);
+
+  const toV4 = async () => {
+    if (!v4) return;
+    const all = voice.model === 'v3';
+    const ok = await confirmSpend({
+      title: all ? 'Pasar el proyecto a v4' : `Pasar a v4 los ${v4.v3Videos} videos que faltan`,
+      body: (
+        <>
+          {all && (
+            <>
+              <strong>Es irreversible:</strong> el proyecto queda en v4 (no se puede volver a v3) y sus videos nuevos nacen en v4 a {speedText(v4Speed)}.{' '}
+            </>
+          )}
+          La locución de {v4.v3Videos === 1 ? 'su video' : `sus ${v4.v3Videos} videos`} en v3 se rehace en v4, párrafo por párrafo y a {speedText(v4Speed)}, en la
+          cola. No se regeneran fotogramas ni clips; se rehacen el post y el final. Las pausas cambiadas a mano se pierden; las reglas de pronunciación y los tonos
+          del guion se mantienen.
+          {v4.waiting.length > 0 && ` ${v4.waiting.length} esperan a terminar lo que están haciendo y pasan solos después.`}
+        </>
+      ),
+      work: { ttsV4Chars: v4.chars },
+      action: 'Pasar a v4',
+    });
+    if (!ok) return;
+    setV4Busy(true);
+    setError(undefined);
+    try {
+      const r = await projectsApi.toV4(project.id, all ? v4Speed : voice.speed);
+      setV4Result(r);
+      onChanged({ ...project, voice: r.voice });
+    } catch (e) {
+      if (!(e instanceof ChangeCancelled)) setError((e as Error).message);
+    } finally {
+      setV4Busy(false);
+    }
+  };
 
   useEffect(() => {
     projectsApi.speedCandidates(project.id).then(setCandidates, (e: Error) => (setError(e.message), setCandidates([])));
@@ -73,6 +121,55 @@ export function ProjectVoiceDialog({ project, onClose, onChanged }: { project: P
   return (
     <Modal title={`Voz del proyecto · «${project.name}»`} onClose={onClose} className="max-w-3xl">
       <div className="grid gap-5 text-xs">
+        {v4Result ? (
+          <section className="border-primary/40 bg-primary/5 grid gap-2 rounded-lg border p-3">
+            <div className="font-medium">Proyecto en v4 a {speedText(v4Result.voice.speed)}</div>
+            <p>
+              {v4Result.started.length
+                ? `${v4Result.started.length} video${v4Result.started.length === 1 ? '' : 's'} pasando a v4: se ven «en curso» en el proyecto y en «Cola».`
+                : 'Ningún video empezó ahora.'}
+              {v4Result.waiting.length > 0 && ` ${v4Result.waiting.length} esperan a terminar lo que están haciendo y pasan solos después.`}
+            </p>
+            {v4Result.waiting.length > 0 && (
+              <ul className="text-muted-foreground grid gap-0.5">
+                {v4Result.waiting.map((w) => (
+                  <li key={w.id}>
+                    «{w.title}»: {w.reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
+          v4 &&
+          (voice.model === 'v3' || v4.v3Videos > 0) && (
+            <section className="border-primary/40 bg-primary/5 grid gap-2 rounded-lg border p-3">
+              <div className="font-medium">{voice.model === 'v3' ? 'Pasar a v4' : `${v4.v3Videos} video${v4.v3Videos === 1 ? '' : 's'} aún en v3`}</div>
+              <p className="text-muted-foreground leading-relaxed">
+                {voice.model === 'v3'
+                  ? 'En v4 la locución se pide por párrafo, con el contexto de sus vecinos: suena mejor y «Rehacer audio» cambia solo ese párrafo. Pasar es irreversible y rehace la locución de todos los videos del proyecto (sin fotogramas ni clips nuevos). Elige la velocidad con la muestra de la voz v4.'
+                  : `Quedaron en v3 (por ejemplo, porque estaban trabajando o tras un reinicio). Pasan a v4 a ${speedText(voice.speed)}, la velocidad del proyecto.`}
+              </p>
+              {!v4.canConvert ? (
+                <p className="text-muted-foreground">Solo el dueño del proyecto puede pasarlo a v4.</p>
+              ) : (
+                <>
+                  {voice.model === 'v3' && <SpeedPicker value={v4Speed} onChange={setV4Speed} model="v4" voiceId={project.defaults?.voiceId} disabled={v4Busy} />}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" onClick={() => void toV4()} disabled={v4Busy || !!busy}>
+                      {v4Busy ? <Loader2 className="animate-spin" /> : <ArrowUpCircle />}{' '}
+                      {voice.model === 'v3' ? `Pasar a v4 a ${speedText(v4Speed)}` : 'Pasar los que faltan a v4'}
+                    </Button>
+                    <span className="text-muted-foreground">
+                      {v4.v3Videos} video{v4.v3Videos === 1 ? '' : 's'} · {v4.chars.toLocaleString('es-CL')} caracteres
+                      {v4.published > 0 && ` · ${v4.published} publicado${v4.published === 1 ? '' : 's'}`}
+                    </span>
+                  </div>
+                </>
+              )}
+            </section>
+          )
+        )}
         <section className="grid gap-2">
           <div className="font-medium">Velocidad de la narración</div>
           <p className="text-muted-foreground leading-relaxed">

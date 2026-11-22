@@ -68,16 +68,16 @@ La web nueva queda publicada en cuanto termina el build; la API nueva, después 
 ### Paso 4 · ¿Hay migraciones nuevas?
 Dónde: SSH en el servidor.
 ```bash
-cd /projects/wilox-motion && source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && pnpm db:status 2>&1 | tail -4
+cd /projects/wilox-motion && source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && pnpm db:status 2>&1 | grep -E "up to date|^[0-9]{14}_"
 ```
-Qué debe salir: `Database schema is up to date!` → salta al paso 6. Si lista migraciones pendientes → paso 5.
+Qué debe salir: `Database schema is up to date!` → salta al paso 6. Si lista migraciones pendientes (`20261121120000_…`) → paso 5. Con pendientes, `prisma migrate status` termina con un error de pnpm (código 1): es lo normal, no un fallo.
 
 ### Paso 5 · Copia de la BD y migración (solo si el paso 4 lo pide)
-Dónde: SSH en el servidor. Pide la clave de `wilox`. No uses `pnpm db:migrate` en el servidor; usa `migrate deploy`.
+Dónde: SSH en el servidor. La clave de `wilox` se saca del `DATABASE_URL` del `.env` (no se escribe ni se muestra). No uses `pnpm db:migrate` en el servidor; usa `migrate deploy`.
 ```bash
-cd /projects/wilox-motion && source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && mkdir -p ~/backups && F=~/backups/wilox-$(date +%F-%H%M).dump && read -rsp "Clave wilox: " PGPASSWORD && echo && export PGPASSWORD && /usr/lib/postgresql/18/bin/pg_dump -Fc --no-owner --no-acl -f "$F" -d "host=ls-683fa66f22db41568a9b96f947bf54152764f008.cda4040msrzs.eu-west-3.rds.amazonaws.com port=5432 dbname=wilox user=wilox sslmode=require" && ls -lh "$F" && pnpm --filter @wilox/db exec prisma migrate deploy; unset PGPASSWORD
+cd /projects/wilox-motion && source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && mkdir -p ~/backups && F=~/backups/wilox-$(date +%F-%H%M).dump && export PGPASSWORD="$(node -e 'const l=require("fs").readFileSync(".env","utf8").split("\n").find(x=>x.startsWith("DATABASE_URL="));const u=new URL(l.slice(13).trim().replace(/^["\x27]|["\x27]$/g,""));process.stdout.write(decodeURIComponent(u.password))')" && test -n "$PGPASSWORD" && /usr/lib/postgresql/18/bin/pg_dump -Fc --no-owner --no-acl -f "$F" -d "host=ls-683fa66f22db41568a9b96f947bf54152764f008.cda4040msrzs.eu-west-3.rds.amazonaws.com port=5432 dbname=wilox user=wilox sslmode=require" && ls -lh "$F" && pnpm --filter @wilox/db exec prisma migrate deploy; unset PGPASSWORD
 ```
-Qué debe salir: el tamaño de la copia y `All migrations have been successfully applied.`
+Qué debe salir: el tamaño de la copia y `All migrations have been successfully applied.` Si no sale nada, no encontró `DATABASE_URL` en el `.env` y no se tocó la base.
 
 ### Paso 6 · Reiniciar la API
 Dónde: SSH en el servidor. Usa siempre el Node `default` (ahí está instalado PM2) y pasa siempre `NODE_EXTRA_CA_CERTS`.
