@@ -27,8 +27,11 @@ export const V4_CREDITS_PER_CHAR = 240 / 495;
 export const VOICE_SPEED_MIN = 0.7;
 export const VOICE_SPEED_MAX = 1.15;
 export const VOICE_SPEED_STEP = 0.05;
-/** Velocidad de los proyectos nuevos (los anteriores quedan en 1,0). */
-export const VOICE_SPEED_DEFAULT = 0.85;
+/**
+ * Velocidad de los proyectos nuevos: 1,0 (ADR-180). Se planificó 0,85 (ADR-178), pero v4 ya es más pausada que v3 y en la
+ * prueba real 1,0 sonó mejor.
+ */
+export const VOICE_SPEED_DEFAULT = 1;
 
 /** Voz de un proyecto (para la web). */
 export interface ProjectVoice {

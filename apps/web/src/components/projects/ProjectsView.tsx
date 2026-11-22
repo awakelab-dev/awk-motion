@@ -350,12 +350,12 @@ function ProjectHeader({
         <div className="flex flex-wrap gap-2">
           {!project.archived && (
             <Button size="sm" onClick={onGenerate}>
-              <Clapperboard /> Nuevo video aquí
+              <Clapperboard /> Nuevo video
             </Button>
           )}
           {activeN > 0 && (
             <Button size="sm" variant="outline" onClick={() => void toggleAll(true)} disabled={busy} title="Saca de la cola los videos de este proyecto que aún no tienen final">
-              <PauseCircle /> Detener en curso
+              <PauseCircle /> Detener
             </Button>
           )}
           {stoppedN > 0 && (
@@ -368,7 +368,7 @@ function ProjectHeader({
             <Gauge /> Voz
           </Button>
           <Button size="sm" variant="outline" disabled={!project.totals.videos} onClick={() => setRevoicing(true)} title="Volver a locutar varios videos en un solo pedido cada uno, con la misma voz: sin cambios de tono entre párrafos">
-            <Mic /> Rehacer la locución
+            <Mic /> Rehacer locución
           </Button>
           <Button size="sm" variant="outline" disabled={!project.totals.videos} onClick={() => setDownloading(true)} title="Todo el proyecto en un paquete (ZIP o SCORM) o un archivo por video">
             <Download /> Descargar
@@ -1077,7 +1077,7 @@ function ProjectDetail({
               ? 'Aquí quedan los videos que aún no están en ningún proyecto. Ahora mismo no hay ninguno.'
               : project.archived
                 ? 'Este proyecto está archivado y no tiene videos.'
-                : 'Aún no hay videos en este proyecto: pulsa «Nuevo video aquí».'}
+                : 'Aún no hay videos en este proyecto: pulsa «Nuevo video».'}
         </Card>
       )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

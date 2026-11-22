@@ -185,8 +185,9 @@ model Project {
   voiceModel  String?   @default("v4")
   /// Semilla de la voz v4 del proyecto (al azar, se fija la primera vez que hace falta).
   voiceSeed   Int?
-  /// Velocidad de la narración de los videos nuevos (T2, ADR-178): 0,70–1,15; nulo = 1 (los anteriores).
-  voiceSpeed  Float?    @default(0.85)
+  /// Velocidad de la narración de los videos nuevos (T2, ADR-178): 0,70–1,15; nulo = 1 (los proyectos nuevos y los
+  /// anteriores; ADR-180 quitó el 0,85 por defecto).
+  voiceSpeed  Float?
 
   owner       User           @relation(fields: [ownerId], references: [id])
   generations Generation[]
