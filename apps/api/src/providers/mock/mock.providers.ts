@@ -41,6 +41,8 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms * env.MOCK_SPEE
  * - `[mock:marcos]` (hito 7): el storyboard pone 1, 2, 3, 4, 1… marcos en los planos, todos como video, para
  *   probar la animación de las imágenes según cuántas haya (en un tema con fotos).
  * - `[mock:largo]` (hito 10): planos cada 13 s, para probar «Dividir en dos» (ADR-130).
+ * - `[mock:anclas]` (hito 13a): el storyboard ancla cada plano (menos el primero) 2 palabras tarde, para probar la
+ *   corrección de la sincronía (ADR-181) y «Reajustar sincronía» (ADR-182).
  */
 const failedOnce = new Set<string>();
 const limited = new Map<string, number>();
@@ -273,7 +275,8 @@ export class MockLlm implements LlmPort {
       shots: anchors.map((a, k) => {
         const txt = words.slice(a.i, a.i + 3).map((w) => w.word.replace(/[^\p{L}\p{N}]/gu, '')).join(' ').toUpperCase();
         return {
-          anchorWordIndex: a.i,
+          // `[mock:anclas]` (hito 13a, T5): Opus se equivoca y ancla 2 palabras después del comienzo de la frase clave.
+          anchorWordIndex: k > 0 && user.includes('[mock:anclas]') ? a.i + 2 : a.i,
           pfc: txt,
           idea: txt,
           title: `MOCK ${k + 1}`,

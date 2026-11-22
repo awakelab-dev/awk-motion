@@ -179,6 +179,11 @@ export interface RunState {
   voiceSeed?: number;
   /** Velocidad aplicada a la locución actual (hito 13a, T2, ADR-178); sin el campo = 1. */
   voiceSpeed?: number;
+  /**
+   * Regla de sincronía de los planos (hito 13a, T5, ADR-181): 'v2' = el ancla es la primera palabra de la frase clave y
+   * el clip empieza 0,5 s antes; sin el campo = la de antes (1 s antes del ancla de Opus).
+   */
+  syncRule?: 'v2';
   text: string;
   status: RunStatus;
   /** Mensaje corto del paso en curso. */

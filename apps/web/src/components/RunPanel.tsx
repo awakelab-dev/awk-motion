@@ -30,6 +30,7 @@ import {
   X,
   Mic,
   Gauge,
+  Timer,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -52,6 +53,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
+import { ChangeCancelled } from '@/lib/confirm';
 import { clipsFor, confirmSpend, useCostText } from '@/lib/spend';
 import { cn } from '@/lib/utils';
 import { useVoiceName } from '@/lib/voices';
@@ -1087,7 +1089,19 @@ function Corrections({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(run.text);
-  const [busy, setBusy] = useState<'reopen' | 'version' | 'music' | 'sound' | 'rule' | 'revoice' | 'speed'>();
+  const [busy, setBusy] = useState<'reopen' | 'version' | 'music' | 'sound' | 'rule' | 'revoice' | 'speed' | 'sync'>();
+  /** «Reajustar sincronía» (hito 13a, T6, ADR-182): sin costo; solo en los videos con la regla de antes. */
+  const resync = async () => {
+    setBusy('sync');
+    setError(undefined);
+    try {
+      await api.resync(run.id);
+    } catch (e) {
+      if (!(e instanceof ChangeCancelled)) setError((e as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
   /** «Cambiar velocidad» (hito 13a, T2, ADR-178): sin pedir voz ni clips. */
   const [speedOpen, setSpeedOpen] = useState(false);
   const [speed, setSpeed] = useState(run.voiceSpeed ?? 1);
@@ -1262,12 +1276,12 @@ function Corrections({
           </Button>
           {run.status === 'done' && (
             <Button size="sm" variant="outline" onClick={openMusic} disabled={!!busy}>
-              <Music /> Cambiar música
+              <Music /> Música
             </Button>
           )}
           {run.status === 'done' && (
             <Button size="sm" variant="outline" onClick={() => setSoundOpen((v) => !v)} disabled={!!busy}>
-              <Volume2 /> Cambiar sonido
+              <Volume2 /> Sonido
             </Button>
           )}
           {run.status === 'done' && rulePlan?.available && (
@@ -1283,6 +1297,17 @@ function Corrections({
           {run.status === 'done' && run.mode !== 'mcp' && (
             <Button size="sm" variant="outline" onClick={() => setSpeedOpen((v) => !v)} disabled={!!busy} title="Estira la locución actual a otra velocidad: sin pedir voz ni clips (sin costo)">
               {busy === 'speed' ? <Loader2 className="animate-spin" /> : <Gauge />} Velocidad ({speedText(run.voiceSpeed ?? 1)})
+            </Button>
+          )}
+          {run.status === 'done' && run.mode !== 'mcp' && run.syncRule !== 'v2' && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void resync()}
+              disabled={!!busy}
+              title="Cada clip empieza 0,5 s antes de que la voz diga su frase clave (la regla nueva). Sin costo: no pide voz, fotogramas ni clips; se rehace el final."
+            >
+              {busy === 'sync' ? <Loader2 className="animate-spin" /> : <Timer />} Sincronía
             </Button>
           )}
         </div>

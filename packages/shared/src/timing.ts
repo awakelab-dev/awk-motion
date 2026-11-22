@@ -13,8 +13,16 @@ export const CLIP_FRAMES = 124;
 export const SHOT_SPACING_SEC = 7.2;
 export const SHOT_MIN_SPACING_SEC = 6.5;
 export const SHOT_MAX_SPACING_SEC = 8;
-/** Cada clip empieza ~1 s antes de que la voz diga su PFC. */
+/** Cada clip empieza ~1 s antes de que la voz diga su PFC (la regla de antes del hito 13a). */
 export const LEAD_FRAMES = 24;
+/**
+ * Regla de sincronía `v2` (hito 13a, T5, ADR-181): el ancla es la primera palabra de la frase clave y el clip empieza
+ * 0,5 s antes. Los videos nuevos nacen con ella; los anteriores la toman con «Reajustar sincronía» (T6).
+ */
+export const LEAD_FRAMES_V2 = 12;
+export type SyncRule = 'v2';
+/** Frames de adelanto del clip según la regla de sincronía del video. */
+export const leadFramesFor = (rule?: string | null) => (rule === 'v2' ? LEAD_FRAMES_V2 : LEAD_FRAMES);
 export const OUTPUT_WIDTH = 2560;
 export const OUTPUT_HEIGHT = 1440;
 

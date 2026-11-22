@@ -101,3 +101,17 @@ export interface ToV4Response {
   waiting: { id: string; title: string; reason: string }[];
   voice: ProjectVoice;
 }
+
+/** «Reajustar sincronía» (hito 13a, T6, ADR-182): videos del proyecto con la regla de antes (clip 1 s antes del ancla de Opus). */
+export interface ResyncStatus {
+  /** Videos con la sincronía de antes. */
+  old: number;
+  /** Los que no se pueden reajustar ahora, con el motivo. */
+  blocked: { id: string; title: string; reason: string }[];
+  published: number;
+}
+
+export interface ResyncResponse {
+  started: string[];
+  skipped: { id: string; title: string; reason: string }[];
+}

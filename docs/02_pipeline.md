@@ -92,3 +92,6 @@ La estructura probada, en este orden:
 
 ## Velocidad de la narración (hito 13a, ADR-178)
 - Cada proyecto tiene su velocidad (0,70–1,15; los nuevos a 1,0, ADR-180). La voz se pide a velocidad 1 y cada párrafo se estira con ffmpeg `rubberband` antes de los tiempos por palabra; las pausas entre párrafos no se estiran. «Cambiar velocidad» de un video ya hecho estira la locución actual y rehace el plan, el post y el final, sin pedir voz ni clips.
+
+## Palabra clave al inicio del clip (hito 13a, ADR-181/182)
+- Desde el hito 13a el ancla de cada plano es la PRIMERA palabra de su frase clave tal como la dice la voz y el clip empieza 0,5 s antes (antes: ~1 s antes de donde Opus anclaba). En pantalla, solo palabras dichas desde el ancla hasta el plano siguiente. El código verifica cada ancla contra la narración y la corrige si Opus se equivoca. Los videos anteriores pasan a la regla nueva con «Reajustar sincronía» (sin costo).

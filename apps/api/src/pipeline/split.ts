@@ -32,9 +32,9 @@ export interface SplitPoint {
  * completos y queda más cerca de la mitad, prefiriendo el inicio de una frase o tras una coma. Devuelve undefined si
  * el tramo no da para dos clips.
  */
-export function pickSplitPoint(o: { words: TimedWord[]; shots: Shot[]; paragraphs: { startSec: number }[]; totalFrames: number; clip: number }): SplitPoint | undefined {
-  const { words, shots, paragraphs, totalFrames, clip } = o;
-  const plan = planShots(words, shots, paragraphs, totalFrames);
+export function pickSplitPoint(o: { words: TimedWord[]; shots: Shot[]; paragraphs: { startSec: number }[]; totalFrames: number; clip: number; leadFrames?: number }): SplitPoint | undefined {
+  const { words, shots, paragraphs, totalFrames, clip, leadFrames } = o;
+  const plan = planShots(words, shots, paragraphs, totalFrames, leadFrames);
   const cur = plan[clip - 1];
   if (!cur || plan.length !== shots.length) return undefined;
   const slot = cur.slotEndFrame - cur.startFrame;
@@ -48,7 +48,7 @@ export function pickSplitPoint(o: { words: TimedWord[]; shots: Shot[]; paragraph
     if (word.start < fromSec) continue;
     if (word.start >= toSec) break;
     const trial = [...shots.slice(0, clip - 1), { ...shots[clip - 1] }, { ...shots[clip - 1], anchorWordIndex: w }, ...shots.slice(clip)];
-    const p = planShots(words, trial, paragraphs, totalFrames);
+    const p = planShots(words, trial, paragraphs, totalFrames, leadFrames);
     if (p.length !== trial.length) continue;
     const a = p[clip - 1];
     const b = p[clip];

@@ -59,7 +59,7 @@ export function storyboardSystemPrompt(t: ThemeStyle): string {
 
 HOW THE VIDEO IS BUILT:
 - The narration is the master timeline. After each 5.167 s AI clip its last frame is held as a freeze-frame while the voice continues, until the next clip starts.
-- Each shot corresponds to one PFC (key word or phrase). The clip starts ~1 s before the voice says it, so the text builds while it is being said.
+- Each shot corresponds to one PFC (key word or phrase) shown on screen. anchorWordIndex is the index of the FIRST word of that key phrase as the voice says it: the clip starts 0.5 s before it, so the key phrase appears right as it is said. The shot's on-screen texts use only words the voice says from its anchor until the next shot's anchor (never words said before the anchor, never words of the next shot).
 - K0 is the intro frame: only the style background, no text. Shot 1 animates K0 -> K1, shot 2 animates K1 -> K2, and so on. Each keyframe is the calm END STATE of its shot and must be self-contained.
 
 CHOOSING SHOTS:

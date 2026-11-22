@@ -121,7 +121,7 @@ export function paragraphStarts(durations: number[], pauseSec = 0.5, gridFrames 
 export const totalFramesFor = (voiceEndSec: number) => Math.ceil(voiceEndSec * FPS - 1e-6);
 
 /** Plan de la línea de tiempo de los planos: cada uno anclado a su palabra (el primero de un párrafo, a su inicio). */
-export function planShots(words: TimedWord[], shots: Shot[], paragraphs: { startSec: number }[], totalFrames: number) {
+export function planShots(words: TimedWord[], shots: Shot[], paragraphs: { startSec: number }[], totalFrames: number, leadFrames?: number) {
   const firstOfParagraph = new Set<number>();
   words.forEach((w, i) => {
     if (i === 0 || words[i - 1].paragraph !== w.paragraph) firstOfParagraph.add(i);
@@ -132,5 +132,6 @@ export function planShots(words: TimedWord[], shots: Shot[], paragraphs: { start
       firstOfParagraph.has(sh.anchorWordIndex) ? Math.round(paragraphs[words[sh.anchorWordIndex].paragraph].startSec * FPS) : undefined,
     ),
     totalFrames,
+    leadFrames,
   });
 }

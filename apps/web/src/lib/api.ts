@@ -1,5 +1,7 @@
 import { ChangeCancelled, confirmChange } from '@/lib/confirm';
 import type {
+  ResyncResponse,
+  ResyncStatus,
   ToV4Response,
   ToV4Status,
   ProjectVoice,
@@ -157,6 +159,9 @@ export const projectsApi = {
   /** «Pasar a v4» (hito 13a, T3, ADR-179): solo el dueño, irreversible. */
   v4Status: (id: string) => req<ToV4Status>(`/projects/${id}/v4`),
   toV4: (id: string, speed: number) => req<ToV4Response>(`/projects/${id}/v4`, { method: 'POST', body: JSON.stringify({ speed }) }),
+  /** «Reajustar sincronía» de los videos con la regla de antes (hito 13a, T6, ADR-182): sin costo. */
+  resyncStatus: (id: string) => req<ResyncStatus>(`/projects/${id}/resync`),
+  resync: (id: string) => req<ResyncResponse>(`/projects/${id}/resync`, { method: 'POST' }),
   /** Detener / reanudar todos los videos sin final del proyecto (hito 5, ADR-052). */
   pause: (id: string) => req<{ paused: number }>(`/projects/${id}/pause`, { method: 'POST' }),
   resume: (id: string) => req<{ resumed: number }>(`/projects/${id}/continue`, { method: 'POST' }),
@@ -226,6 +231,8 @@ export const api = {
   revoiceAll: (id: string) => req<RunState>(`/generations/${id}/revoice-all`, { method: 'POST' }),
   /** «Cambiar velocidad» de un video (hito 13a, T2, ADR-178): sin pedir voz ni clips. */
   changeSpeed: (id: string, speed: number) => req<RunState>(`/generations/${id}/speed`, { method: 'POST', body: JSON.stringify({ speed }) }),
+  /** «Reajustar sincronía» de un video (hito 13a, T6, ADR-182): sin costo. */
+  resync: (id: string) => req<RunState>(`/generations/${id}/resync`, { method: 'POST' }),
   /** Muestra de la voz a una velocidad (WAV; la frase se pide una vez por voz y versión). */
   voiceSampleUrl: (o: { voiceId?: string; model: VoiceModel; speed: number }) =>
     `/api/voice-sample?${new URLSearchParams({ model: o.model, speed: String(o.speed), ...(o.voiceId ? { voiceId: o.voiceId } : {}) })}`,

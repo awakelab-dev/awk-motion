@@ -1,6 +1,6 @@
-import { ArrowUpCircle, Gauge, Globe, Loader2 } from 'lucide-react';
+import { ArrowUpCircle, Gauge, Globe, Loader2, Timer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { VOICE_SPEED_DEFAULT, type ProjectSummary, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status } from '@wilox/shared';
+import { VOICE_SPEED_DEFAULT, type ProjectSummary, type ResyncResponse, type ResyncStatus, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status } from '@wilox/shared';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { SpeedPicker, speedText } from '@/components/voice/SpeedPicker';
@@ -38,6 +38,25 @@ export function ProjectVoiceDialog({ project, onClose, onChanged }: { project: P
     setSaved(voice.speed);
     setSpeed(voice.speed);
   }, [voice.model, voice.speed]);
+
+  // «Reajustar sincronía» (T6, ADR-182).
+  const [sync, setSync] = useState<ResyncStatus>();
+  const [syncResult, setSyncResult] = useState<ResyncResponse>();
+  const [syncBusy, setSyncBusy] = useState(false);
+  useEffect(() => {
+    projectsApi.resyncStatus(project.id).then(setSync, () => undefined);
+  }, [project.id, syncResult]);
+  const resync = async () => {
+    setSyncBusy(true);
+    setError(undefined);
+    try {
+      setSyncResult(await projectsApi.resync(project.id));
+    } catch (e) {
+      if (!(e instanceof ChangeCancelled)) setError((e as Error).message);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
 
   const toV4 = async () => {
     if (!v4) return;
@@ -252,6 +271,45 @@ export function ProjectVoiceDialog({ project, onClose, onChanged }: { project: P
             </>
           )}
         </section>
+        {(syncResult || (sync && sync.old > 0)) && (
+          <section className="grid gap-2">
+            <div className="font-medium">Sincronía de las palabras clave</div>
+            {syncResult ? (
+              <div className="grid gap-1">
+                <p>
+                  {syncResult.started.length
+                    ? `${syncResult.started.length} video${syncResult.started.length === 1 ? '' : 's'} reajustándose (sin costo): se rehace el final de cada uno.`
+                    : 'Ningún video empezó.'}
+                </p>
+                {syncResult.skipped.length > 0 && (
+                  <ul className="text-muted-foreground grid gap-0.5">
+                    {syncResult.skipped.map((s) => (
+                      <li key={s.id}>
+                        «{s.title}»: {s.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              sync && (
+                <>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {sync.old === 1 ? 'Un video tiene' : `${sync.old} videos tienen`} la sincronía de antes (el clip empieza 1 s antes de donde Opus ancló el plano). «Reajustar
+                    sincronía» hace empezar cada clip 0,5 s antes de que la voz diga su frase clave. Sin costo: no pide voz, fotogramas ni clips; se rehace el final.
+                    {sync.blocked.length > 0 && ` Ahora no se pueden ${sync.blocked.length} (trabajando o sin terminar): quedan para después.`}
+                  </p>
+                  <div>
+                    <Button size="sm" variant="outline" onClick={() => void resync()} disabled={syncBusy || !!busy || sync.old === sync.blocked.length}>
+                      {syncBusy ? <Loader2 className="animate-spin" /> : <Timer />} Reajustar sincronía de {sync.old - sync.blocked.length} video
+                      {sync.old - sync.blocked.length === 1 ? '' : 's'}
+                    </Button>
+                  </div>
+                </>
+              )
+            )}
+          </section>
+        )}
         {error && <div className="text-destructive">{error}</div>}
         <div className="flex justify-end">
           <Button size="sm" variant="ghost" onClick={onClose}>

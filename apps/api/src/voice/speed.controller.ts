@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { VOICE_SPEED_MAX, VOICE_SPEED_MIN, type AuthUser, type ProjectVoice, type RunState, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status } from '@wilox/shared';
+import { VOICE_SPEED_MAX, VOICE_SPEED_MIN, type AuthUser, type ProjectVoice, type RunState, type SpeedBatchResponse, type SpeedCandidate, type ResyncResponse, type ResyncStatus, type ToV4Response, type ToV4Status } from '@wilox/shared';
 import { CurrentUser } from '../auth/decorators.js';
 import { speedText } from './speed.js';
 import { SpeedService } from './speed.service.js';
@@ -72,5 +72,24 @@ export class SpeedController {
     const r = SpeedSchema.safeParse(body ?? {});
     bad(r);
     return this.speed.toV4(id, user, r.data!.speed, confirm === '1');
+  }
+
+  /** «Reajustar sincronía» de un video (T6, ADR-182): sin costo. */
+  @Post('generations/:id/resync')
+  @HttpCode(202)
+  resyncVideo(@Param('id') id: string, @Headers('x-confirm-change') confirm: string | undefined, @CurrentUser() user: AuthUser): Promise<RunState> {
+    return this.speed.resyncVideo(id, user.id, confirm === '1');
+  }
+
+  @Get('projects/:id/resync')
+  resyncStatus(@Param('id') id: string): Promise<ResyncStatus> {
+    return this.speed.resyncStatus(id);
+  }
+
+  /** «Reajustar sincronía» de todos los videos del proyecto con la regla de antes. */
+  @Post('projects/:id/resync')
+  @HttpCode(202)
+  resyncProject(@Param('id') id: string, @Headers('x-confirm-change') confirm: string | undefined): Promise<ResyncResponse> {
+    return this.speed.resyncProject(id, confirm === '1');
   }
 }

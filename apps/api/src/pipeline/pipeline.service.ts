@@ -35,6 +35,7 @@ import {
   type VoiceTrialSettings,
   type KeyframeMediaFrame,
   V4_MAX_CHARS,
+  leadFramesFor,
 } from '@wilox/shared';
 import {
   clipVideoPrompt,
@@ -118,6 +119,7 @@ import { rescaleWords, respace, sameSpeed, scaleRelative, shiftedClips, speedRat
 import type { WordTime } from './align.js';
 import { pickSplitPoint, shiftIndexName, SPLIT_MIN_FRAMES, type SplitPoint } from './split.js';
 import { planPause } from './pause.js';
+import { syncAnchors } from './sync.js';
 import { renumberForSplit } from '../persistence/run-split.js';
 import { clipShift, compose, finalCues, INSERT_VOICE_LEAD, TRANSITION_FRAMES, transitionCut, transitionFirst, transitionFrames, transitionWindow, type Composition } from './inserts.js';
 
@@ -708,12 +710,12 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const totalFrames = totalFramesFor(starts[starts.length - 1] + durs[durs.length - 1]);
     const words = rescaleWords(rec.words!, paras.map((p) => p.startSec), starts, ratio);
     const paragraphs = paras.map((p, i) => ({ ...p, startSec: starts[i], durationSec: durs[i] }));
-    const plan = planShots(words, rec.shots!, paragraphs, totalFrames);
+    const plan = planShots(words, rec.shots!, paragraphs, totalFrames, this.lead(rec));
     if (plan.length !== rec.shots!.length) {
       await Promise.all(out.map((o) => rm(o.tmp, { force: true })));
       throw new Error(`A velocidad ${speedText(speed)} no caben todos los planos (${plan.length} de ${rec.shots!.length}); no se aplicó. Prueba una velocidad más lenta.`);
     }
-    const shifted = shiftedClips(words, rec.shots!.map((sh) => sh.anchorWordIndex), paragraphs, plan);
+    const shifted = shiftedClips(words, rec.shots!.map((sh) => sh.anchorWordIndex), paragraphs, plan, this.lead(rec));
 
     // Se aplica: audios de los párrafos, voz completa, tiempos y plan (los fotogramas y los clips no cambian).
     for (const [i, o] of out.entries()) await rename(o.tmp, wavs[i]);
@@ -746,6 +748,68 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       await this.post(rec);
     } else if (before === 'awaiting_approval') {
       this.step(rec, 'awaiting_approval', 'Velocidad cambiada. Revisa los fotogramas y aprueba cuando estés conforme.');
+      this.reviewMessage(rec);
+    }
+  }
+
+  // ---------------------------------------------------------------- «Reajustar sincronía» (hito 13a, T6, ADR-182)
+
+  /**
+   * «Reajustar sincronía» de un video ya hecho: aplica la regla v2 (T5, ADR-181) sin costo. Corrige cada ancla a la
+   * primera palabra de su frase clave, hace empezar cada clip 0,5 s antes (en vez de 1 s) y recalcula el plan; si el
+   * video estaba terminado, se rehacen el post y el final (el anterior se conserva). No pide voz, fotogramas ni clips.
+   */
+  resync(rec: RunRecord) {
+    const why = this.speedBlocked(rec);
+    if (why) throw new Error(why);
+    const s = rec.state;
+    const done = s.status === 'done' && rec.approved;
+    this.guard(rec, async () => {
+      const before = s.status;
+      try {
+        await this.resyncInner(rec, before, done);
+      } catch (e) {
+        if (rec.state.status !== 'voice') throw e;
+        const msg = (e as Error).message;
+        this.store.log(rec, `No se pudo reajustar la sincronía: ${msg}`, 'warn');
+        this.store.update(rec, (st) => ((st.status = before), (st.message = `No se pudo reajustar la sincronía: ${msg.split('\n')[0]}`)));
+      }
+    });
+  }
+
+  private async resyncInner(rec: RunRecord, before: RunState['status'], done: boolean) {
+    const s = rec.state;
+    this.step(rec, 'voice', 'Reajustando la sincronía de las palabras clave…');
+    const words = rec.words!;
+    const sync = syncAnchors(words, rec.shots!);
+    const shots = rec.shots!.map((sh, i) => ({ ...sh, anchorWordIndex: sync.anchors[i] }));
+    const plan = planShots(words, shots, s.paragraphs, s.totalFrames!, leadFramesFor('v2'));
+    if (plan.length !== shots.length) throw new Error(`Con la sincronía nueva no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó.`);
+    const changed = plan.filter((p, i) => p.startFrame !== rec.plan![i]?.startFrame).length;
+    rec.shots = shots;
+    rec.plan = plan;
+    this.store.update(rec, (st) => {
+      st.clips.forEach((c, i) => ((c.startFrame = plan[i].startFrame), (c.slotEndFrame = plan[i].slotEndFrame)));
+      st.syncRule = 'v2';
+      if (changed) {
+        st.finalUrl = undefined;
+        st.finalFrames = undefined;
+      }
+    });
+    await this.savePrompt(rec, 'plan.json', JSON.stringify(plan.map((pl, i) => ({ clip: `clip${nn(i + 1)}`, pfc: shots[i].pfc, layout: shots[i].keyframe.layout, ...pl })), null, 2));
+    this.store.log(
+      rec,
+      `Sincronía reajustada (sin costo): los clips empiezan 0,5 s antes de su frase clave; ${sync.moved.length} ancla(s) corregida(s)` +
+        (sync.moved.length ? ` (${sync.moved.map((m) => `«${shots[m.shot].pfc}» ${words[m.from]?.word} → ${words[m.to]?.word}`).join(' · ')})` : '') +
+        `; ${changed} de ${plan.length} clips cambian de inicio.`,
+    );
+    if (done && changed) {
+      this.step(rec, 'post', 'Sincronía reajustada: se rehacen el post y el render (sin regenerar clips)…');
+      await this.post(rec);
+    } else if (done) {
+      this.step(rec, 'done', 'Sincronía reajustada: el plan no cambió.');
+    } else if (before === 'awaiting_approval') {
+      this.step(rec, 'awaiting_approval', 'Sincronía reajustada. Revisa los fotogramas y aprueba cuando estés conforme.');
       this.reviewMessage(rec);
     }
   }
@@ -902,7 +966,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     });
     const shots = rec.shots!.map((sh, i) => ({ ...sh, anchorWordIndex: i === 0 ? 0 : Math.min(words.length - 1, indexMap[sh.anchorWordIndex] ?? sh.anchorWordIndex) }));
     const paragraphs = paras.map((p, i) => ({ ...p, startSec: starts[i], durationSec: list[i].dur, version, spokenText: spoken[i] !== texts[i] ? spoken[i] : undefined }));
-    const plan = planShots(words, shots, paragraphs, totalFrames);
+    const plan = planShots(words, shots, paragraphs, totalFrames, this.lead(rec));
     if (plan.length !== shots.length) throw new Error(`Con la locución v4 no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó.`);
 
     const voiceWav = join(vdir, 'voz_completa.wav');
@@ -1177,8 +1241,18 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       .map((sh) => ({ ...sh, anchorWordIndex: Math.max(0, Math.min(words.length - 1, Math.round(sh.anchorWordIndex))) }))
       .sort((a, b) => a.anchorWordIndex - b.anchorWordIndex);
     shots[0].anchorWordIndex = 0;
+    // Palabra clave al inicio del clip (T5, ADR-181): el código verifica que cada ancla sea la primera palabra de su frase clave.
+    if (s.syncRule === 'v2') {
+      const sync = syncAnchors(words, shots);
+      sync.anchors.forEach((a, i) => (shots[i].anchorWordIndex = a));
+      if (sync.moved.length)
+        this.store.log(
+          rec,
+          `Sincronía: ${sync.moved.length} ancla(s) corregida(s) a la primera palabra de su frase clave (${sync.moved.map((m) => `«${shots[m.shot].pfc}» ${words[m.from]?.word} → ${words[m.to]?.word}`).join(' · ')}).`,
+        );
+    }
     if (!rec.theme.usesMediaFrames) shots.forEach((sh) => (sh.keyframe.mediaFrames = []));
-    const plan = planShots(words, shots, s.paragraphs, s.totalFrames!);
+    const plan = planShots(words, shots, s.paragraphs, s.totalFrames!, this.lead(rec));
     const kept = plan.map((pl) => shots[pl.shot]);
     if (kept.length < shots.length) this.store.log(rec, `Se descartaron ${shots.length - kept.length} PFC que no cabían en la línea de tiempo.`, 'warn');
     rec.storyboard = board;
@@ -1787,7 +1861,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       }
       const shots = rec.shots!.map((sh, i) => ({ ...sh, anchorWordIndex: i === 0 ? 0 : Math.min(words.length - 1, indexMap[sh.anchorWordIndex] ?? sh.anchorWordIndex) }));
       const paragraphs = s.paragraphs.map((p) => ({ ...p, startSec: starts[p.index] }));
-      const plan = planShots(words, shots, paragraphs, totalFrames);
+      const plan = planShots(words, shots, paragraphs, totalFrames, this.lead(rec));
       if (plan.length !== shots.length)
         throw new Error(
           `Con la nueva locución del párrafo ${index + 1} no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó. Prueba otro texto o usa "Cambiar el texto".`,
@@ -1857,7 +1931,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
 
   private splitPointOf(rec: RunRecord, index: number): SplitPoint | undefined {
     if (!rec.words?.length || !rec.shots?.length || !rec.state.totalFrames) return undefined;
-    return pickSplitPoint({ words: rec.words, shots: rec.shots, paragraphs: rec.state.paragraphs, totalFrames: rec.state.totalFrames, clip: index });
+    return pickSplitPoint({ words: rec.words, shots: rec.shots, paragraphs: rec.state.paragraphs, totalFrames: rec.state.totalFrames, clip: index, leadFrames: this.lead(rec) });
   }
 
   /**
@@ -1920,7 +1994,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     await renumberForSplit(this.db, s.id, index, { shots: newShots, keyframeLabel: `K${nn(index)} · ${mid.pfc}`, keyframeTexts: mid.keyframe.texts, newClipTitle: second.title });
     await this.store.reload(rec);
     const st = rec.state;
-    const plan = planShots(rec.words!, rec.shots!, st.paragraphs, st.totalFrames!);
+    const plan = planShots(rec.words!, rec.shots!, st.paragraphs, st.totalFrames!, this.lead(rec));
     if (plan.length !== rec.shots!.length) throw new Error(`Tras dividir, el plan tiene ${plan.length} de ${rec.shots!.length} planos.`);
     rec.plan = plan;
     this.store.update(rec, (x) => {
@@ -2064,7 +2138,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     // Mismos planos (el texto no cambia, así que las anclas son las mismas palabras); nuevo plan.
     const totalFrames = totalFramesFor(endSec);
     const paragraphs = paras.map((p, i) => ({ ...p, startSec: parts[i].startSec }));
-    const plan = planShots(words, rec.shots!, paragraphs, totalFrames);
+    const plan = planShots(words, rec.shots!, paragraphs, totalFrames, this.lead(rec));
     if (plan.length !== rec.shots!.length)
       throw new Error(`Con esta locución no caben todos los planos (${plan.length} de ${rec.shots!.length}); no se aplicó.`);
     const voiceWav = join(vdir, 'voz_completa.wav');
@@ -2096,6 +2170,11 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     this.store.log(rec, `Prueba de voz · ${label}: ${(totalFrames / FPS).toFixed(2)} s en total (antes ${(s.durationSec ?? 0).toFixed(2)} s). Se rehacen el post y el render, sin regenerar clips.`);
     this.step(rec, 'post', `Prueba de voz · ${label}: rehaciendo el post y el render…`);
     await this.post(rec);
+  }
+
+  /** Frames de adelanto del clip según la regla de sincronía del video (T5, ADR-181). */
+  private lead(rec: RunRecord): number {
+    return leadFramesFor(rec.state.syncRule);
   }
 
   /** En MCP (Higgsfield, sin tiempos por carácter) la locución solo se puede pedir por párrafo. */
@@ -2177,7 +2256,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     }
     const shots = rec.shots!.map((sh, i) => ({ ...sh, anchorWordIndex: i === 0 ? 0 : Math.min(words.length - 1, indexMap[sh.anchorWordIndex] ?? sh.anchorWordIndex) }));
     const paragraphs = paras.map((p, i) => ({ ...p, startSec: r.parts[i].startSec }));
-    const plan = planShots(words, shots, paragraphs, totalFrames);
+    const plan = planShots(words, shots, paragraphs, totalFrames, this.lead(rec));
     if (plan.length !== shots.length)
       throw new Error(`Con la nueva locución no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó. Prueba otro texto o usa "Cambiar el texto".`);
 
@@ -2260,7 +2339,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const last = p.paragraphs[p.paragraphs.length - 1];
     const totalFrames = totalFramesFor(last.startSec + last.durationSec);
     const shots = rec.shots!;
-    const plan = planShots(p.words, shots, p.paragraphs, totalFrames);
+    const plan = planShots(p.words, shots, p.paragraphs, totalFrames, this.lead(rec));
     if (plan.length !== shots.length) throw new Error(`Con esa pausa no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó.`);
 
     // El audio del párrafo (para que «Rehacer audio» por párrafo y el armado de la locución lo conserven) y la

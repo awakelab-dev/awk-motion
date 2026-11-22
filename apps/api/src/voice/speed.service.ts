@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Db } from '@wilox/db';
-import { clampSpeed, FPS, VOICE_SAMPLE_TEXT, type AuthUser, type ProjectVoice, type SpeedBatchResponse, type SpeedCandidate, type ToV4Response, type ToV4Status, type VoiceModel } from '@wilox/shared';
+import { clampSpeed, FPS, VOICE_SAMPLE_TEXT, type AuthUser, type ProjectVoice, type SpeedBatchResponse, type SpeedCandidate, type ResyncResponse, type ResyncStatus, type ToV4Response, type ToV4Status, type VoiceModel } from '@wilox/shared';
 import { AccessService } from '../access/access.service.js';
 import { env, repoPath } from '../config/env.js';
 import { DB } from '../db/db.module.js';
@@ -132,6 +132,76 @@ export class SpeedService implements OnModuleInit, OnModuleDestroy {
       }
     }
     this.logger.log(`Proyecto ${projectId} en v4 a ${speedText(sp)}: ${out.started.length} video(s) en marcha, ${out.waiting.length} esperando.`);
+    return out;
+  }
+
+  // ─── Reajustar sincronía (T6, ADR-182) ──────────────────────────────────────────────────────────────
+
+  /** «Reajustar sincronía» de un video (sin costo; con el aviso de siempre si está publicado). */
+  async resyncVideo(id: string, userId: string, confirmed: boolean) {
+    const rec = await this.store.get(id);
+    if (!rec) throw new NotFoundException('Video no encontrado.');
+    const why = this.pipeline.speedBlocked(rec);
+    if (why) throw new BadRequestException(why);
+    await this.publications.guardVideo(id, userId, confirmed);
+    try {
+      this.pipeline.resync(rec);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+    return rec.state;
+  }
+
+  /** Videos del proyecto con la sincronía de antes (los del modo en que corre la API). */
+  private async oldSync(projectId: string) {
+    const rows = await this.db.generation.findMany({
+      where: { projectId, trashedAt: null, deletedAt: null, mode: this.providers.mode },
+      select: { id: true, text: true, syncRule: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.filter((g) => !this.trash.isHidden(g.id) && (this.store.peek(g.id) ? this.store.peek(g.id)!.state.syncRule : g.syncRule) !== 'v2');
+  }
+
+  async resyncStatus(projectId: string): Promise<ResyncStatus> {
+    const list = await this.oldSync(projectId);
+    const blocked: ResyncStatus['blocked'] = [];
+    for (const g of list) {
+      const rec = await this.store.get(g.id);
+      const why = rec ? this.pipeline.speedBlocked(rec) : 'No se encontró.';
+      if (why) blocked.push({ id: g.id, title: this.delivery.videoTitle(g.text), reason: why });
+    }
+    const published = await this.publications.publishedUses(list.map((g) => g.id));
+    return { old: list.length, blocked, published: published.size };
+  }
+
+  /** «Reajustar sincronía» de todos los videos del proyecto con la regla de antes (sin costo). */
+  async resyncProject(projectId: string, confirmed: boolean): Promise<ResyncResponse> {
+    const list = await this.oldSync(projectId);
+    const published = await this.publications.publishedUses(list.map((g) => g.id));
+    if (published.size && !confirmed)
+      throw new ConflictException({
+        code: 'confirm',
+        title: published.size === 1 ? 'Hay un video publicado' : `Hay ${published.size} videos publicados`,
+        message: `${published.size === 1 ? 'Uno de los videos está publicado' : `${published.size} de los videos están publicados`}. Al reajustar su sincronía, quienes los ven —el curso del cliente— verán la nueva versión en unos minutos.`,
+        action: 'Reajustar de todos modos',
+      });
+    const out: ResyncResponse = { started: [], skipped: [] };
+    for (const g of list) {
+      const title = this.delivery.videoTitle(g.text);
+      const rec = await this.store.get(g.id);
+      const why = rec ? this.pipeline.speedBlocked(rec) : 'No se encontró.';
+      if (why || !rec) {
+        out.skipped.push({ id: g.id, title, reason: why ?? 'No se encontró.' });
+        continue;
+      }
+      try {
+        this.pipeline.resync(rec);
+        this.store.log(rec, 'Reajustar sincronía desde el proyecto (varios videos a la vez).');
+        out.started.push(g.id);
+      } catch (e) {
+        out.skipped.push({ id: g.id, title, reason: (e as Error).message });
+      }
+    }
     return out;
   }
 

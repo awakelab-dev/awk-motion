@@ -307,6 +307,8 @@ export class GenerationsController {
         // Locución en un solo pedido (ADR-133); en MCP (Higgsfield, sin tiempos por carácter), por párrafo.
         voiceMode: this.providers.mode === 'mcp' || v4 ? 'paragraph' : env.VOICE_MODE,
         ...(v4 ? { voiceModel: 'v4' as const, voiceSeed: voice.seed } : {}),
+        // Palabra clave al inicio del clip (T5, ADR-181): todo storyboard nuevo usa la regla v2.
+        syncRule: 'v2' as const,
         // Velocidad de la narración del proyecto (T2, ADR-178): se aplica al pedir la voz.
         ...(voice && Math.abs(voice.speed - 1) > 1e-3 ? { voiceSpeed: voice.speed } : {}),
         script: o.script,
