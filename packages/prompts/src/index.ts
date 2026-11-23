@@ -239,6 +239,36 @@ NARRATION DURING CLIP B (from the word "${opts.splitWord}"): "${opts.secondNarra
 Return the intermediate shot, clip B's animation/endState/sound and a short explanation in Spanish.`;
 }
 
+/**
+ * «Dividir en dos» cuando todos los textos del plano ya se dijeron antes del corte (hito 13a, ADR-184): el plano actual
+ * no cambia; un clip nuevo va de su fotograma a uno nuevo que continúa la misma composición y agrega lo que dice la voz en
+ * la segunda mitad. Fuera del golden.
+ */
+export function extendShotSystemPrompt(t: ThemeStyle): string {
+  return `You are the art director of a premium motion graphics video (style "${t.info.name}"). One shot of the storyboard stays on screen too long (most of it is a frozen last frame) and every on-screen text of it has already been said before the split point, so the shot is EXTENDED with one more clip:
+- the CURRENT shot and its keyframe DO NOT CHANGE;
+- a NEW clip goes from the current keyframe to a NEW KEYFRAME that you write, while the voice says the narration of the second part;
+- the next shot (if any) will start from your new keyframe.
+Write the new shot as the natural continuation of the current keyframe: the SAME background, layout family, typography and visual language, keeping every existing element and text (they may move or shrink a little to make room), and ADD what the narration of the second part says: normally one short new on-screen text copied literally from that narration (never paraphrased, at most ~6 words; uppercase with " / " line breaks if longer than 4 words) and, if it helps, one simple supporting element. Do not add words that are not in the narration of the second part. "texts" lists every visible string of the new keyframe: the current ones (copied exactly) plus the new one(s). Its animation goes from the current keyframe to the new one (3-4 beats, 0-5 s; the existing elements stay calm while the new ones build in sync with the voice). anchorWordIndex is not used (the app sets it). Keep pfc and title in the language of the original fields.
+
+${artDirection(t)}
+
+STYLE NOTES: ${t.directorNotes}
+${t.usesMediaFrames ? '' : 'mediaFrames must be [].'}${mediaFrameRuleLine(t)}`;
+}
+
+export function extendShotUserPrompt(opts: { shot: Shot; nextSummary?: string; firstNarration: string; secondNarration: string; splitWord: string }): string {
+  return `CURRENT SHOT (its keyframe is the START of the new clip and does not change):
+${JSON.stringify(opts.shot, null, 1)}
+
+${opts.nextSummary ? `NEXT KEYFRAME (the next shot will start from your new keyframe): ${opts.nextSummary}` : 'This is the last shot of the video.'}
+
+NARRATION DURING THE CURRENT CLIP (already shown on screen): "${opts.firstNarration}"
+NARRATION DURING THE NEW CLIP (from the word "${opts.splitWord}"): "${opts.secondNarration}"
+
+Return the new shot and a short explanation in Spanish.`;
+}
+
 // ------------------------------------------------------------------ ensamblado
 
 /**

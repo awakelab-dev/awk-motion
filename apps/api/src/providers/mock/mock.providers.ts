@@ -230,6 +230,22 @@ export class MockLlm implements LlmPort {
     if (props.includes('choreography')) {
       return { startElements: 'Mock: inicio.', endElements: 'Mock: fin.', choreography: 'Mock: the elements of the start frame slide out to the left while the shapes of the end frame slide in from the right.' };
     }
+    if (props.includes('extension')) {
+      // «Dividir en dos» modo 'extend' (ADR-184): el fotograma nuevo suma las dos primeras palabras de la segunda mitad.
+      const m = text.match(/CURRENT SHOT \(its keyframe is the START of the new clip and does not change\):\n([\s\S]+?)\n\n(NEXT KEYFRAME|This is the last)/);
+      const shot = JSON.parse(m![1]) as Shot;
+      const second = text.match(/NARRATION DURING THE NEW CLIP \(from the word "[^"]*"\): "([^"]*)"/)?.[1] ?? '';
+      const fresh = second.split(/\s+/).filter(Boolean).slice(0, 2).join(' ').replace(/[.,;:!?¡¿]/g, '');
+      return {
+        extension: {
+          ...shot,
+          pfc: fresh || shot.pfc,
+          title: `${shot.title} B`,
+          keyframe: { ...shot.keyframe, scene: `${shot.keyframe.scene} (continued)`, summary: `continuation of ${shot.keyframe.summary}`, texts: [...shot.keyframe.texts, ...(fresh ? [fresh] : [])] },
+        },
+        explanation: 'Mock: el fotograma nuevo suma lo que dice la voz después.',
+      };
+    }
     if (props.includes('intermediate')) {
       // «Dividir en dos» (ADR-130): el intermedio es el plano con solo su primer texto.
       const m = text.match(/CURRENT SHOT \(its keyframe stays as the end of clip B\):\n([\s\S]+?)\n\nPREVIOUS KEYFRAME/);

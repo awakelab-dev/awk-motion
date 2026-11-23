@@ -12,6 +12,7 @@ import {
   TransitionPlanSchema,
   ShotSchema,
   ClipSplitSchema,
+  ClipExtendSchema,
   StoryboardReviewSchema,
   applyMediaFrameRule,
   mediaKindsLabel,
@@ -55,6 +56,8 @@ import {
   reviewUserPrompt,
   reviseShotSystemPrompt,
   splitShotSystemPrompt,
+  extendShotSystemPrompt,
+  extendShotUserPrompt,
   splitShotUserPrompt,
   reviseShotUserPrompt,
   scriptDirectionPrompt,
@@ -120,8 +123,8 @@ import { rescaleWords, respace, sameSpeed, scaleRelative, shiftedClips, speedRat
 import type { WordTime } from './align.js';
 import { pickSplitPoint, shiftIndexName, SPLIT_MIN_FRAMES, type SplitPoint } from './split.js';
 import { planPause } from './pause.js';
-import { syncAnchors } from './sync.js';
-import { renumberForSplit } from '../persistence/run-split.js';
+import { firstSaid, normWord, syncAnchors, textTokens } from './sync.js';
+import { appendForExtend, renumberForSplit } from '../persistence/run-split.js';
 import { clipShift, compose, finalCues, INSERT_VOICE_LEAD, TRANSITION_FRAMES, transitionCut, transitionFirst, transitionFrames, transitionWindow, type Composition } from './inserts.js';
 
 /** Segmento del final ya ubicado: frame de inicio en el final y, en los insertos, cuál es. */
@@ -1927,7 +1930,22 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const point = this.splitPointOf(rec, index);
     if (!point) return { ...base, available: false, reason: 'No hay una palabra en el tramo que deje los dos clips completos.' };
     const w = rec.words![point.wordIndex];
-    return { ...base, available: true, cutWord: w.word, cutSec: point.startFrame / FPS, firstSec: point.firstFrames / FPS, secondSec: point.secondFrames / FPS };
+    const mode = this.splitModeOf(rec, index, point);
+    const clips = mode === 'extend' && index === s.clips.length ? 1 : 2;
+    return { ...base, available: true, cutWord: w.word, cutSec: point.startFrame / FPS, firstSec: point.firstFrames / FPS, secondSec: point.secondFrames / FPS, mode, clips };
+  }
+
+  /**
+   * Cómo dividir (hito 13a, ADR-184): si todos los textos del plano que se encuentran en la narración se dicen antes del
+   * corte, un fotograma intermedio quedaría igual al final ('extend'); si no, el intermedio de siempre (ADR-130).
+   */
+  private splitModeOf(rec: RunRecord, index: number, point: SplitPoint): 'intermediate' | 'extend' {
+    const shots = rec.shots!;
+    const words = rec.words!;
+    const shot = shots[index - 1];
+    const end = index < shots.length ? shots[index].anchorWordIndex : words.length;
+    const said = shot.keyframe.texts.map((t) => firstSaid(words, t, shot.anchorWordIndex, end - 1)).filter((x): x is number => x !== undefined);
+    return said.length && said.every((p) => p < point.wordIndex) ? 'extend' : 'intermediate';
   }
 
   private splitPointOf(rec: RunRecord, index: number): SplitPoint | undefined {
@@ -1950,6 +1968,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
   }
 
   private async splitInner(rec: RunRecord, index: number, point: SplitPoint) {
+    if (this.splitModeOf(rec, index, point) === 'extend') return this.extendInner(rec, index, point);
     const s = rec.state;
     const words = rec.words!;
     const shots = rec.shots!;
@@ -2016,6 +2035,119 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
 
     // Fotograma intermedio, los dos clips y el final.
     await this.splitFinish(rec, index);
+  }
+
+  /**
+   * «Dividir en dos» cuando todos los textos del plano se dicen antes del corte (hito 13a, ADR-184): el clip `index` no
+   * cambia (solo se acorta su tramo); un clip nuevo va de su fotograma Ki a un fotograma nuevo que Opus escribe con lo que
+   * dice la voz en la segunda mitad (textos literales de esa parte de la narración), y el clip siguiente, si lo hay, se
+   * rehace desde ese fotograma nuevo. El fotograma nuevo se genera con Ki como referencia, para que continúe la misma
+   * composición.
+   */
+  private async extendInner(rec: RunRecord, index: number, point: SplitPoint) {
+    const words = rec.words!;
+    const shots = rec.shots!;
+    const shot = shots[index - 1];
+    const next = shots[index];
+    const endWord = next ? next.anchorWordIndex : words.length;
+    const say = (a: number, b: number) => words.slice(a, b).map((w) => w.word).join(' ');
+    this.step(rec, 'keyframes', `Dividiendo clip${nn(index)} en dos: Opus escribe el fotograma nuevo con lo que dice la voz después…`);
+    let ext;
+    try {
+      ext = await this.askJson(
+        ClipExtendSchema,
+        extendShotSystemPrompt(rec.theme),
+        extendShotUserPrompt({ shot, nextSummary: next?.keyframe.summary, firstNarration: say(shot.anchorWordIndex, point.wordIndex), secondNarration: say(point.wordIndex, endWord), splitWord: words[point.wordIndex].word }),
+        'Clip nuevo tras dividir',
+      );
+    } catch (e) {
+      this.store.log(rec, `No se pudo dividir clip${nn(index)}: ${(e as Error).message}`, 'warn');
+      this.step(rec, 'done', `No se pudo dividir clip${nn(index)}; el video sigue como estaba.`);
+      return;
+    }
+    const added = ext.extension;
+    // Textos: los del fotograma actual tal cual, más los nuevos solo si salen literales de la narración de la segunda mitad.
+    const current = new Set(shot.keyframe.texts.map((t) => t.trim()));
+    const second = new Set(words.slice(point.wordIndex, endWord).map((w) => normWord(w.word)));
+    const literal = (t: string) => textTokens(t).length > 0 && textTokens(t).every((x) => second.has(x));
+    const dropped = added.keyframe.texts.filter((t) => !current.has(t.trim()) && !literal(t));
+    added.keyframe.texts = added.keyframe.texts.filter((t) => current.has(t.trim()) || literal(t));
+    if (!rec.theme.usesMediaFrames) added.keyframe.mediaFrames = [];
+    else applyMediaFrameRule([added], rec.theme.mediaFrameRule);
+    // Ancla: donde la voz dice el primer texto nuevo (regla de sincronía), si así los dos clips siguen completos; si no, el corte.
+    const fresh = added.keyframe.texts.filter((t) => !current.has(t.trim()));
+    const said = fresh.map((t) => firstSaid(words, t, point.wordIndex, endWord - 1)).filter((x): x is number => x !== undefined);
+    added.anchorWordIndex = point.wordIndex;
+    if (said.length) {
+      const at = Math.min(...said);
+      const trial = [...shots.slice(0, index), { ...added, anchorWordIndex: at }, ...shots.slice(index)];
+      const p = planShots(words, trial, rec.state.paragraphs, rec.state.totalFrames!, this.lead(rec));
+      const ok =
+        p.length === trial.length &&
+        p[index - 1].slotEndFrame - p[index - 1].startFrame >= CLIP_FRAMES &&
+        (!next || (p[index].slotEndFrame - p[index].startFrame >= CLIP_FRAMES && p[index + 1].startFrame === rec.plan![index].startFrame));
+      if (ok) added.anchorWordIndex = at;
+    }
+    const newShots = [...shots.slice(0, index), added, ...shots.slice(index)];
+
+    this.step(rec, 'keyframes', `Dividiendo clip${nn(index)}: reordenando fotogramas y clips…`);
+    await this.store.flush(rec);
+    const renamed = next ? await this.renameForSplit(rec, index + 1) : 0;
+    const row = { shots: newShots, keyframeLabel: `K${nn(index + 1)} · ${added.pfc}`, keyframeTexts: added.keyframe.texts };
+    // Con un clip siguiente, el corrimiento de siempre desde index+1: la fila del clip siguiente pasa a ser el clip nuevo
+    // (versión nueva, de Ki al fotograma nuevo) y se crea index+2 (el siguiente, rehecho desde el fotograma nuevo).
+    if (next) await renumberForSplit(this.db, rec.state.id, index + 1, { ...row, newClipTitle: next.title, continues: index });
+    else await appendForExtend(this.db, rec.state.id, index, { ...row, newClipTitle: added.title });
+    await this.store.reload(rec);
+    const st = rec.state;
+    const plan = planShots(rec.words!, rec.shots!, st.paragraphs, st.totalFrames!, this.lead(rec));
+    if (plan.length !== rec.shots!.length) throw new Error(`Tras dividir, el plan tiene ${plan.length} de ${rec.shots!.length} planos.`);
+    rec.plan = plan;
+    this.store.update(rec, (x) => {
+      x.clips.forEach((c, i) => ((c.startFrame = plan[i].startFrame), (c.slotEndFrame = plan[i].slotEndFrame)));
+      const a = x.clips.find((c) => c.index === index + 1);
+      if (a) a.title = added.title;
+    });
+    await this.savePrompt(rec, `K${nn(index + 1)}_plano_v1.json`, JSON.stringify(added, null, 2));
+    await this.savePrompt(
+      rec,
+      `clip${nn(index)}_division.json`,
+      JSON.stringify({ modo: 'extend', corte: { palabra: words[point.wordIndex].word, segundo: point.startFrame / FPS, ...point }, ancla: words[added.anchorWordIndex]?.word, explicacion: ext.explanation, descartados: dropped }, null, 2),
+    );
+    this.store.log(
+      rec,
+      `clip${nn(index)} dividido: todos sus textos se dicen antes del corte, así que clip${nn(index)} no cambia y clip${nn(index + 1)} va de K${nn(index)} a un fotograma nuevo K${nn(index + 1)} desde «${words[added.anchorWordIndex]?.word}» (${fresh.length ? `agrega ${fresh.map((t) => `«${t}»`).join(', ')}` : 'sin texto nuevo'})${next ? `; clip${nn(index + 2)} se rehace desde ese fotograma` : ''}. ${ext.explanation}${dropped.length ? ` Descartados por no estar en la narración: ${dropped.map((t) => `«${t}»`).join(', ')}.` : ''}${renamed ? ` Se corrieron ${renamed} archivos.` : ''}`,
+    );
+    await this.extendFinish(rec, index);
+  }
+
+  /** Lo que queda de una división 'extend': el fotograma nuevo (con Ki como referencia), los clips pendientes, el post y el final. */
+  private async extendFinish(rec: RunRecord, index: number) {
+    const ki = index + 1;
+    const k = rec.state.keyframes.find((x) => x.index === ki);
+    if (k && (k.status !== 'ready' || !rec.keyAssets.get(ki))) {
+      const cur = rec.keyAssets.get(index)?.path;
+      if (cur && k.version === 0) {
+        const ref = relative(rec.dir, isAbsolute(cur) ? cur : join(rec.dir, cur));
+        const instruction =
+          'Editor reference image 1 is the CURRENT frame of this same video and the new frame continues it: copy its background, layout, typography, colours and every element and text exactly, in the same places (they may move or shrink a little to make room), and add only what the SCENE above adds.';
+        const prompt = this.keyframePrompt(rec, ki, { count: 1, instruction });
+        this.store.update(rec, () => ((k.version = 1), (k.prompt = prompt), (k.pending = { stage: 'image', refs: [ref] })));
+        await this.savePrompt(rec, `K${nn(ki)}_imagen_v1.md`, prompt);
+      }
+      this.step(rec, 'keyframes', `Generando el fotograma nuevo K${nn(ki)} (continúa K${nn(index)})…`);
+      await this.regenOne(rec, ki);
+      if (k.status !== 'ready') throw new Error(k.error ?? `No se generó K${nn(ki)}.`);
+    }
+    for (const c of rec.state.clips.filter((x) => x.status !== 'ready')) {
+      c.prompt = this.clipPrompt(rec, c.index);
+      await this.savePrompt(rec, c.version > 1 ? `clip${nn(c.index)}_video_v${c.version}.md` : `clip${nn(c.index)}_video.md`, c.prompt);
+    }
+    this.store.update(rec);
+    await this.ensureRefs(rec);
+    this.kickInserts(rec);
+    await this.clips(rec);
+    await this.post(rec);
   }
 
   /** Lo que queda de una división: el fotograma intermedio (si falta) y los clips pendientes, el post y el final. */

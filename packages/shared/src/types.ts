@@ -833,6 +833,14 @@ export interface ClipSplitInfo {
   cutSec?: number;
   firstSec?: number;
   secondSec?: number;
+  /**
+   * Cómo se divide (hito 13a, ADR-184): 'intermediate' = un fotograma intermedio antes del final (ADR-130); 'extend' =
+   * todos los textos del plano se dicen antes del corte, así que el clip no cambia y uno nuevo va de su fotograma a uno
+   * nuevo con lo que dice la voz después (el clip siguiente se rehace desde ese fotograma).
+   */
+  mode?: 'intermediate' | 'extend';
+  /** Cuántos clips se generan (2, o 1 si en modo 'extend' es el último clip). */
+  clips?: number;
 }
 
 /**

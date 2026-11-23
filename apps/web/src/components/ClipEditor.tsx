@@ -723,11 +723,17 @@ function ClipSplitSection({ run, c, onDone }: { run: RunState; c: ClipState; onD
   }, [run.id, c.index, c.version, c.startFrame, c.slotEndFrame, run.status]);
   if (!info) return null;
   const nn = (n: number) => String(n).padStart(2, '0');
+  // ADR-184: si todos los textos se dicen antes del corte, el clip queda igual y el nuevo va a un fotograma nuevo.
+  const extend = info.mode === 'extend';
+  const clips = info.clips ?? 2;
+  const last = clips === 1;
   const split = async () => {
     const ok = await confirmSpend({
       title: `Dividir clip${nn(c.index)} en dos`,
-      body: `Opus escribe un fotograma intermedio en «${info.cutWord}» (${info.cutSec?.toFixed(1)} s). clip${nn(c.index)} pasa a ir hasta ese fotograma (${info.firstSec?.toFixed(1)} s) y un clip nuevo va de ahí al fotograma final (${info.secondSec?.toFixed(1)} s); los clips y fotogramas siguientes se renumeran. Se vuelve a unir el final y el anterior se conserva.`,
-      work: { images: 1, clips: 2, llm: 1 },
+      body: extend
+        ? `Todo lo que muestra este fotograma se dice antes de «${info.cutWord}» (${info.cutSec?.toFixed(1)} s), así que clip${nn(c.index)} queda igual (${info.firstSec?.toFixed(1)} s). Opus escribe un fotograma nuevo con lo que dice la voz después, y un clip nuevo va del fotograma actual a ese (${info.secondSec?.toFixed(1)} s).${last ? '' : ` El clip siguiente se rehace para partir del fotograma nuevo; los clips y fotogramas siguientes se renumeran.`} Se vuelve a unir el final y el anterior se conserva.`
+        : `Opus escribe un fotograma intermedio en «${info.cutWord}» (${info.cutSec?.toFixed(1)} s). clip${nn(c.index)} pasa a ir hasta ese fotograma (${info.firstSec?.toFixed(1)} s) y un clip nuevo va de ahí al fotograma final (${info.secondSec?.toFixed(1)} s); los clips y fotogramas siguientes se renumeran. Se vuelve a unir el final y el anterior se conserva.`,
+      work: { images: 1, clips, llm: 1 },
       action: 'Dividir en dos',
     });
     if (!ok) return;
@@ -748,7 +754,7 @@ function ClipSplitSection({ run, c, onDone }: { run: RunState; c: ClipState; onD
       <div className="text-muted-foreground text-[11px]">
         El tramo de este clip dura {info.slotSec.toFixed(1)} s ({Math.min(info.slotSec, 5.17).toFixed(1)} s animados y el resto congelado).
         {info.available
-          ? ` Se corta en «${info.cutWord}» (${info.cutSec?.toFixed(1)} s): dos clips de ${info.firstSec?.toFixed(1)} s y ${info.secondSec?.toFixed(1)} s.`
+          ? ` Se corta en «${info.cutWord}» (${info.cutSec?.toFixed(1)} s): dos clips de ${info.firstSec?.toFixed(1)} s y ${info.secondSec?.toFixed(1)} s.${extend ? ' Como sus textos se dicen antes del corte, la segunda mitad va a un fotograma nuevo con lo que dice la voz después.' : ''}`
           : ` ${info.reason}`}
       </div>
       {info.available && (
@@ -756,7 +762,7 @@ function ClipSplitSection({ run, c, onDone }: { run: RunState; c: ClipState; onD
           <Button size="sm" variant="outline" onClick={() => void split()} disabled={busy}>
             {busy ? <Loader2 className="animate-spin" /> : <Scissors />} Dividir en dos
           </Button>
-          <span className="text-muted-foreground text-[11px]">1 fotograma, 2 clips y Opus.</span>
+          <span className="text-muted-foreground text-[11px]">1 fotograma, {clips === 1 ? '1 clip' : `${clips} clips`} y Opus.</span>
         </div>
       )}
       {err && <div className="text-destructive">{err}</div>}

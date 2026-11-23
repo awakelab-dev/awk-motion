@@ -17,8 +17,11 @@ export async function renumberForSplit(
   db: Db,
   id: string,
   clip: number,
-  o: { shots: Shot[]; keyframeLabel: string; keyframeTexts: string[]; newClipTitle: string },
+  o: { shots: Shot[]; keyframeLabel: string; keyframeTexts: string[]; newClipTitle: string; continues?: number },
 ): Promise<void> {
+  // En modo 'extend' (ADR-184) el clip `clip` pasa a ser la continuación del clip `continues`: lleva su esquina del logo
+  // y los insertos que iban después de `continues` pasan a ir después de él.
+  const after = o.continues ?? clip;
   await db.$transaction(
     async (tx) => {
       // Índices: en dos tiempos para no chocar con el índice único (generationId, index).
@@ -69,6 +72,7 @@ export async function renumberForSplit(
       const corners = shiftKeys(d.clipCorners, clip + 1);
       // El clip nuevo (segunda mitad) lleva la misma esquina que el clip que se divide.
       if (corners && d.clipCorners?.[String(clip)] !== undefined) corners[String(clip + 1)] = d.clipCorners[String(clip)];
+      if (corners && o.continues !== undefined && d.clipCorners?.[String(o.continues)] !== undefined) corners[String(clip)] = d.clipCorners[String(o.continues)];
       if (corners) d.clipCorners = corners;
       // La portada (último cuadro antes del congelado de un clip; sin elegir, el clip 1) pasa a la segunda mitad
       // si era la del clip dividido: ahí sigue estando el fotograma que se eligió.
@@ -76,7 +80,7 @@ export async function renumberForSplit(
       if (poster >= clip && (d.posterClip !== undefined || d.posterSec === undefined)) d.posterClip = poster + 1;
       if (Object.keys(d).length) newDelivery = d as unknown as Prisma.InputJsonValue;
       const inserts = (g.inserts ?? undefined) as InsertState[] | undefined;
-      const newInserts = inserts?.map((x) => (x.after >= clip ? { ...x, after: x.after + 1 } : x));
+      const newInserts = inserts?.map((x) => (x.after >= after ? { ...x, after: x.after + 1 } : x));
       await tx.generation.update({
         where: { id },
         data: {
@@ -88,4 +92,38 @@ export async function renumberForSplit(
     },
     { timeout: 60_000 },
   );
+}
+
+/**
+ * «Dividir en dos» en modo 'extend' del ÚLTIMO clip (hito 13a, ADR-184): no hay nada que correr; se crean el fotograma
+ * nuevo K`clip+1` y el clip `clip+1` (pendientes, con la esquina del logo del clip `clip`) y se guardan los planos.
+ * (Con un clip siguiente se usa `renumberForSplit(clip + 1)`.)
+ */
+export async function appendForExtend(
+  db: Db,
+  id: string,
+  clip: number,
+  o: { shots: Shot[]; keyframeLabel: string; keyframeTexts: string[]; newClipTitle: string },
+): Promise<void> {
+  await db.$transaction(async (tx) => {
+    const last = await tx.clip.findUniqueOrThrow({ where: { generationId_index: { generationId: id, index: clip } } });
+    await tx.keyframe.create({ data: { generationId: id, index: clip + 1, label: o.keyframeLabel, texts: o.keyframeTexts, prompt: '', status: 'pending', version: 0 } });
+    await tx.clip.create({
+      data: { generationId: id, index: clip + 1, title: o.newClipTitle, startFrame: last.startFrame, slotEndFrame: last.slotEndFrame, prompt: '', status: 'pending', version: 1, soundMode: last.soundMode },
+    });
+    const g = await tx.generation.findUniqueOrThrow({ where: { id }, select: { delivery: true, inserts: true } });
+    const d = { ...((g.delivery ?? {}) as { clipCorners?: Record<string, string> }) };
+    if (d.clipCorners?.[String(clip)] !== undefined) d.clipCorners = { ...d.clipCorners, [String(clip + 1)]: d.clipCorners[String(clip)] };
+    // Un inserto al final (después del último clip) pasa a ir después del clip nuevo.
+    const inserts = (g.inserts ?? undefined) as InsertState[] | undefined;
+    const moved = inserts?.map((x) => (x.after >= clip ? { ...x, after: x.after + 1 } : x));
+    await tx.generation.update({
+      where: { id },
+      data: {
+        shots: o.shots as unknown as Prisma.InputJsonValue,
+        ...(Object.keys(d).length ? { delivery: d as unknown as Prisma.InputJsonValue } : {}),
+        ...(moved?.length ? { inserts: moved as unknown as Prisma.InputJsonValue } : {}),
+      },
+    });
+  });
 }

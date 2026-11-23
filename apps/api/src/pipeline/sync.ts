@@ -93,3 +93,16 @@ export function syncAnchors(words: { word: string; paragraph: number }[], shots:
   }
   return { anchors, moved };
 }
+
+/**
+ * Dónde dice la voz por primera vez el texto `text` dentro de [lo, hi] (con las mismas reglas: 2 primeras palabras, o una
+ * sola palabra de 4 letras o más que no sea de enlace). Para «Dividir en dos» (ADR-184).
+ */
+export function firstSaid(words: { word: string }[], text: string, lo: number, hi: number): number | undefined {
+  const toks = words.map((w) => normWord(w.word));
+  const ph = tokens(text);
+  return findPhrase(toks, ph, lo, Math.min(hi, toks.length - 1), lo);
+}
+
+/** Palabras normalizadas de un texto (para comprobar que un texto nuevo sale literal de la narración). */
+export const textTokens = tokens;

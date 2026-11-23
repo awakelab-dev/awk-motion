@@ -67,6 +67,16 @@ export const ClipSplitSchema = z.object({
 });
 export type ClipSplit = z.infer<typeof ClipSplitSchema>;
 
+/**
+ * «Dividir en dos» cuando todos los textos del plano se dicen antes del corte (hito 13a, ADR-184): el clip dividido no
+ * cambia y un clip nuevo va de su fotograma a uno nuevo que agrega lo que dice la voz en la segunda mitad.
+ */
+export const ClipExtendSchema = z.object({
+  extension: ShotSchema.describe('El plano nuevo: su fotograma continúa el actual y agrega lo que dice la voz en la segunda mitad.'),
+  explanation: z.string().describe('Qué agrega el fotograma nuevo y por qué, en español, en una o dos frases.'),
+});
+export type ClipExtend = z.infer<typeof ClipExtendSchema>;
+
 export const StoryboardSchema = z.object({
   intro: z.object({
     scene: z.string().describe('Fotograma K0: solo el fondo del estilo, sin texto, en inglés, máximo 40 palabras.'),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normWord, syncAnchors } from './sync.js';
+import { firstSaid, normWord, syncAnchors, textTokens } from './sync.js';
 
 const W = (text: string, paragraph = 0) => text.split(' ').map((word) => ({ word, paragraph }));
 
@@ -72,5 +72,20 @@ describe('el clip empieza con el primer texto en pantalla que dice la voz (hito 
   it('sin coincidencias, deja el ancla de Opus', () => {
     const words = W('una frase sin relación con la palabra clave del plano');
     expect(syncAnchors(words, [{ anchorWordIndex: 0, pfc: 'x' }, { anchorWordIndex: 5, pfc: 'Fotosíntesis' }]).anchors).toEqual([0, 5]);
+  });
+});
+
+describe('«Dividir en dos» modo extend: dónde se dice un texto del fotograma (hito 13a, ADR-184)', () => {
+  const words = W('Ya conoces el oído medio y el umbral en dB HL. ¡Te invitamos a comenzar el siguiente módulo!');
+  it('encuentra la primera vez que la voz dice el texto dentro del tramo', () => {
+    expect(firstSaid(words, 'OÍDO MEDIO', 0, words.length - 1)).toBe(3);
+    expect(firstSaid(words, '¡TE INVITAMOS A COMENZAR!', 0, words.length - 1)).toBe(11);
+  });
+  it('fuera del tramo o sin coincidencia, no lo encuentra', () => {
+    expect(firstSaid(words, 'OÍDO MEDIO', 5, words.length - 1)).toBeUndefined();
+    expect(firstSaid(words, 'Audiometría tonal', 0, words.length - 1)).toBeUndefined();
+  });
+  it('las palabras de un texto se comparan normalizadas', () => {
+    expect(textTokens('¡Te invitamos!')).toEqual(['te', 'invitamos']);
   });
 });
