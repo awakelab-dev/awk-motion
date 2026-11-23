@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Db } from '@wilox/db';
-import { clampSpeed, FPS, VOICE_SAMPLE_TEXT, type AuthUser, type ProjectVoice, type SpeedBatchResponse, type SpeedCandidate, type ResyncResponse, type ResyncStatus, type ToV4Response, type ToV4Status, type VoiceModel } from '@wilox/shared';
+import { clampSpeed, FPS, SYNC_RULE, VOICE_SAMPLE_TEXT, type AuthUser, type ProjectVoice, type SpeedBatchResponse, type SpeedCandidate, type ResyncResponse, type ResyncStatus, type ToV4Response, type ToV4Status, type VoiceModel } from '@wilox/shared';
 import { AccessService } from '../access/access.service.js';
 import { env, repoPath } from '../config/env.js';
 import { DB } from '../db/db.module.js';
@@ -159,7 +159,7 @@ export class SpeedService implements OnModuleInit, OnModuleDestroy {
       select: { id: true, text: true, syncRule: true },
       orderBy: { createdAt: 'asc' },
     });
-    return rows.filter((g) => !this.trash.isHidden(g.id) && (this.store.peek(g.id) ? this.store.peek(g.id)!.state.syncRule : g.syncRule) !== 'v2');
+    return rows.filter((g) => !this.trash.isHidden(g.id) && (this.store.peek(g.id) ? this.store.peek(g.id)!.state.syncRule : g.syncRule) !== SYNC_RULE);
   }
 
   async resyncStatus(projectId: string): Promise<ResyncStatus> {

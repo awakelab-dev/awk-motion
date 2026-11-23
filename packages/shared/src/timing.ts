@@ -20,9 +20,15 @@ export const LEAD_FRAMES = 24;
  * 0,5 s antes. Los videos nuevos nacen con ella; los anteriores la toman con «Reajustar sincronía» (T6).
  */
 export const LEAD_FRAMES_V2 = 12;
-export type SyncRule = 'v2';
-/** Frames de adelanto del clip según la regla de sincronía del video. */
-export const leadFramesFor = (rule?: string | null) => (rule === 'v2' ? LEAD_FRAMES_V2 : LEAD_FRAMES);
+/**
+ * Reglas de sincronía: 'v2' (21-11-2026, ADR-181) anclaba en la primera palabra de la frase clave de Opus; 'v3' (la de
+ * hoy, ADR-183) ancla en el primero de los textos en pantalla que dice la voz. Las dos con el clip 0,5 s antes.
+ */
+export type SyncRule = 'v2' | 'v3';
+/** Regla de sincronía con la que nacen los videos nuevos y a la que lleva «Reajustar sincronía». */
+export const SYNC_RULE: SyncRule = 'v3';
+/** Frames de adelanto del clip según la regla de sincronía del video (sin regla = la de antes, 1 s). */
+export const leadFramesFor = (rule?: string | null) => (rule ? LEAD_FRAMES_V2 : LEAD_FRAMES);
 export const OUTPUT_WIDTH = 2560;
 export const OUTPUT_HEIGHT = 1440;
 

@@ -1,13 +1,17 @@
 /**
- * Palabra clave al inicio del clip (hito 13a, T5, ADR-181): el ancla de cada plano es la PRIMERA palabra de su frase clave
- * tal como la dice la voz. Opus recibe la regla en el storyboard y el código la verifica: busca la frase clave (`pfc`) —o,
- * si no es literal, el comienzo de uno de los textos en pantalla— en la narración cerca del ancla de Opus y, si la
- * encuentra en otro lugar, corrige el ancla. Los planos que abren un párrafo no se mueven (el clip empieza con el
- * párrafo). Sirve también para «Reajustar sincronía» de videos ya hechos (T6).
+ * Palabra clave al inicio del clip (hito 13a, T5, ADR-181; regla `v3`, ADR-183): el clip de cada plano empieza 0,5 s
+ * antes de que la voz diga el PRIMERO de los textos que el plano muestra en pantalla (normalmente su frase clave). Opus
+ * recibe la regla en el storyboard y el código la verifica: busca cada texto del plano (y su `pfc`) en la narración, cerca
+ * del ancla de Opus, y pone el ancla en el que la voz dice primero. Los planos que abren un párrafo no se mueven (el clip
+ * empieza con el párrafo). Sirve también para «Reajustar sincronía» de videos ya hechos (T6).
+ *
+ * Por qué el primer texto y no solo la `pfc` (ADR-183): en storyboards anteriores la `pfc` a menudo no era lo que domina
+ * el fotograma (p. ej. pfc «dB HL» con «EJE VERTICAL» como título, dicho 5 s antes): anclar en la pfc hacía llegar el clip
+ * tarde respecto de lo que muestra.
  */
 
-/** Palabras de enlace: una sola de ellas no basta para reconocer la frase. */
-const LINK = new Set(['a', 'al', 'con', 'de', 'del', 'el', 'en', 'es', 'la', 'las', 'lo', 'los', 'o', 'para', 'por', 'que', 'se', 'su', 'sus', 'un', 'una', 'y']);
+/** Palabras de enlace: una sola de ellas no basta para reconocer un texto. */
+const LINK = new Set(['a', 'al', 'con', 'de', 'del', 'el', 'en', 'es', 'la', 'las', 'lo', 'los', 'o', 'para', 'por', 'que', 'se', 'su', 'sus', 'un', 'una', 'y', 'u']);
 
 /** Palabra normalizada: minúsculas, sin tildes ni signos. */
 export function normWord(w: string): string {
@@ -18,7 +22,7 @@ export function normWord(w: string): string {
     .replace(/[^a-z0-9ñ]/g, '');
 }
 
-const tokens = (t: string) => t.split(/[\s/]+/).map(normWord).filter(Boolean);
+const tokens = (t: string) => t.split(/[\s/,;:.]+/).map(normWord).filter(Boolean);
 
 /** Cuántos de los primeros tokens de `phrase` coinciden desde la posición `j` de la narración. */
 function prefixAt(toks: string[], j: number, phrase: string[]): number {
@@ -27,18 +31,20 @@ function prefixAt(toks: string[], j: number, phrase: string[]): number {
   return k;
 }
 
-/** Posición en [lo, hi] donde empieza la frase (entera o, si no, sus primeras palabras), la más cercana a `near`. */
+/**
+ * Dónde dice la voz el texto `phrase` dentro de [lo, hi] (la aparición más cercana a `near`). Un texto de varias palabras
+ * se reconoce por sus 2 primeras (o entero); uno de una sola palabra, si tiene 4 letras o más y no es de enlace.
+ */
 function findPhrase(toks: string[], phrase: string[], lo: number, hi: number, near: number): number | undefined {
   if (!phrase.length) return undefined;
-  let best: { j: number; k: number } | undefined;
+  const need = phrase.length === 1 ? 1 : 2;
+  if (phrase.length === 1 && (phrase[0].length < 4 || LINK.has(phrase[0]))) return undefined;
+  let best: number | undefined;
   for (let j = lo; j <= hi; j++) {
-    const k = prefixAt(toks, j, phrase);
-    // Vale la frase entera, o sus 2 primeras palabras, o una sola palabra que no sea de enlace y tenga 4 letras o más.
-    const ok = k === phrase.length || k >= 2 || (k === 1 && phrase[0].length >= 4 && !LINK.has(phrase[0]));
-    if (!ok) continue;
-    if (!best || k > best.k || (k === best.k && Math.abs(j - near) < Math.abs(best.j - near))) best = { j, k };
+    if (prefixAt(toks, j, phrase) < need) continue;
+    if (best === undefined || Math.abs(j - near) < Math.abs(best - near)) best = j;
   }
-  return best?.j;
+  return best;
 }
 
 export interface SyncShot {
@@ -49,10 +55,12 @@ export interface SyncShot {
 
 export interface SyncResult {
   anchors: number[];
-  moved: { shot: number; from: number; to: number; by: 'pfc' | 'texto' }[];
+  moved: { shot: number; from: number; to: number; by: string }[];
 }
 
-/** Palabras alrededor del ancla de Opus donde se busca la frase. */
+/** Hasta cuántas palabras antes del ancla de Opus puede decir la voz el primer texto del plano. */
+export const SYNC_BACK_WORDS = 20;
+/** Hasta cuántas palabras después. */
 export const SYNC_WINDOW_WORDS = 25;
 
 /** Anclas corregidas de los planos (en orden; siguen siendo crecientes). */
@@ -64,23 +72,20 @@ export function syncAnchors(words: { word: string; paragraph: number }[], shots:
     const a = anchors[i];
     if (a <= 0 || a >= words.length) continue;
     if (words[a - 1].paragraph !== words[a].paragraph) continue; // abre un párrafo: queda
-    const lo = Math.max(anchors[i - 1] + 1, a - SYNC_WINDOW_WORDS);
+    const lo = Math.max(anchors[i - 1] + 1, a - SYNC_BACK_WORDS);
     const next = i + 1 < shots.length ? shots[i + 1].anchorWordIndex : words.length;
     const hi = Math.min(next - 1, a + SYNC_WINDOW_WORDS, words.length - 1);
     if (hi < lo) continue;
-    let to = findPhrase(toks, tokens(shots[i].pfc), lo, hi, a);
-    let by: 'pfc' | 'texto' = 'pfc';
-    if (to === undefined)
-      for (const t of shots[i].keyframe?.texts ?? []) {
-        const ph = tokens(t);
-        if (ph.length < 2) continue;
-        const j = findPhrase(toks, ph, lo, hi, a);
-        if (j !== undefined && prefixAt(toks, j, ph) >= 2) {
-          to = j;
-          by = 'texto';
-          break;
-        }
+    // El primero que dice la voz entre la frase clave y los textos en pantalla.
+    let to: number | undefined;
+    let by = '';
+    for (const t of [shots[i].pfc, ...(shots[i].keyframe?.texts ?? [])]) {
+      const j = findPhrase(toks, tokens(t), lo, hi, a);
+      if (j !== undefined && (to === undefined || j < to)) {
+        to = j;
+        by = t;
       }
+    }
     if (to !== undefined && to !== a) {
       anchors[i] = to;
       moved.push({ shot: i, from: a, to, by });

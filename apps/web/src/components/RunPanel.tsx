@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RUN_STEPS, type PublicationInfo, type ClipLogo, type ClipState, type InsertState, type VideoDelivery, type VideoShare, type KeyframeState, type MediaRulePlan, type MusicTrackInfo, type PromptSummary, type RunState, type SoundMode } from '@wilox/shared';
+import { RUN_STEPS, SYNC_RULE, type PublicationInfo, type ClipLogo, type ClipState, type InsertState, type VideoDelivery, type VideoShare, type KeyframeState, type MediaRulePlan, type MusicTrackInfo, type PromptSummary, type RunState, type SoundMode } from '@wilox/shared';
 import { MusicPicker, trackTitle } from '@/components/MusicPicker';
 import { DownloadDialog } from '@/components/DownloadDialog';
 import { PublicationsPanel } from '@/components/delivery/PublicationsPanel';
@@ -1299,13 +1299,17 @@ function Corrections({
               {busy === 'speed' ? <Loader2 className="animate-spin" /> : <Gauge />} Velocidad ({speedText(run.voiceSpeed ?? 1)})
             </Button>
           )}
-          {run.status === 'done' && run.mode !== 'mcp' && run.syncRule !== 'v2' && (
+          {run.status === 'done' && run.mode !== 'mcp' && (
             <Button
               size="sm"
               variant="outline"
               onClick={() => void resync()}
-              disabled={!!busy}
-              title="Cada clip empieza 0,5 s antes de que la voz diga su frase clave (la regla nueva). Sin costo: no pide voz, fotogramas ni clips; se rehace el final."
+              disabled={!!busy || run.syncRule === SYNC_RULE}
+              title={
+                run.syncRule === SYNC_RULE
+                  ? 'Ya tiene la sincronía actual: cada clip empieza 0,5 s antes de que la voz diga el primer texto que muestra.'
+                  : 'Cada clip empieza 0,5 s antes de que la voz diga el primer texto que muestra (la regla actual). Sin costo: no pide voz, fotogramas ni clips; se rehace el final.'
+              }
             >
               {busy === 'sync' ? <Loader2 className="animate-spin" /> : <Timer />} Sincronía
             </Button>

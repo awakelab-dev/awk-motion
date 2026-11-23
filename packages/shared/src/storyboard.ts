@@ -41,7 +41,7 @@ export const ShotSchema = z.object({
   anchorWordIndex: z
     .number()
     .int()
-    .describe('Índice (de la lista numerada de palabras) de la PRIMERA palabra de la PFC tal como la dice la voz.'),
+    .describe('Índice (de la lista numerada de palabras) de la primera palabra del PRIMER texto en pantalla que dice la voz (normalmente la PFC).'),
   pfc: z.string().describe('La palabra o frase clave, en español.'),
   idea: z.string().describe('La única idea que comunica este plano, en español, en pocas palabras.'),
   title: z.string().describe('Título corto del plano, en inglés y mayúsculas (p. ej. WELCOME).'),

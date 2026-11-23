@@ -3,7 +3,7 @@ import { normWord, syncAnchors } from './sync.js';
 
 const W = (text: string, paragraph = 0) => text.split(' ').map((word) => ({ word, paragraph }));
 
-describe('palabra clave al inicio del clip (hito 13a, T5, ADR-181)', () => {
+describe('el clip empieza con el primer texto en pantalla que dice la voz (hito 13a, ADR-181/183)', () => {
   it('normaliza tildes, mayúsculas y signos', () => {
     expect(normWord('Pétalos,')).toBe('petalos');
     expect(normWord('«AGUA»')).toBe('agua');
@@ -11,13 +11,23 @@ describe('palabra clave al inicio del clip (hito 13a, T5, ADR-181)', () => {
 
   it('mueve el ancla a la primera palabra de la frase clave', () => {
     const words = W('El agua es vital. Las gotas caen sobre los pétalos de las flores y alimentan los ríos del valle.');
-    // Opus ancló el plano 2 en «pétalos» (10) pero su frase clave es «las gotas caen» (4).
     const r = syncAnchors(words, [
       { anchorWordIndex: 0, pfc: 'agua' },
       { anchorWordIndex: 9, pfc: 'Las gotas caen' },
     ]);
     expect(r.anchors).toEqual([0, 4]);
-    expect(r.moved).toEqual([{ shot: 1, from: 9, to: 4, by: 'pfc' }]);
+    expect(r.moved).toEqual([{ shot: 1, from: 9, to: 4, by: 'Las gotas caen' }]);
+  });
+
+  it('si el título del fotograma se dice antes que la frase clave, el ancla va al título (caso «EJE VERTICAL» / «dB HL»)', () => {
+    const words = W('En su eje horizontal se indican las frecuencias, y en su eje vertical, u ordenada, los niveles de audición expresados en dB HL. En este gráfico');
+    const r = syncAnchors(words, [
+      { anchorWordIndex: 2, pfc: 'eje horizontal' },
+      { anchorWordIndex: 21, pfc: 'dB HL', keyframe: { texts: ['EJE VERTICAL', 'ORDENADA', 'niveles de audición', 'dB HL'] } },
+    ]);
+    // «eje vertical» (11) antes que «dB HL» (21); «eje horizontal» (2) queda fuera: es del plano anterior.
+    expect(r.anchors).toEqual([2, 11]);
+    expect(r.moved[0].by).toBe('EJE VERTICAL');
   });
 
   it('no mueve un ancla que ya está bien, ni el primer plano de un párrafo', () => {
@@ -30,14 +40,23 @@ describe('palabra clave al inicio del clip (hito 13a, T5, ADR-181)', () => {
     expect(r.moved).toEqual([]);
   });
 
-  it('si la frase clave no es literal, usa el comienzo de un texto en pantalla', () => {
+  it('una palabra suelta solo cuenta si el texto es de una palabra y no es de enlace', () => {
     const words = W('Hoy veremos cómo cuidar el agua en casa con pequeñas acciones diarias para todos.');
     const r = syncAnchors(words, [
       { anchorWordIndex: 0, pfc: 'hoy' },
-      { anchorWordIndex: 11, pfc: 'Ahorro doméstico', keyframe: { texts: ['PEQUEÑAS ACCIONES / diarias'] } },
+      { anchorWordIndex: 11, pfc: 'Ahorro doméstico', keyframe: { texts: ['PEQUEÑAS ACCIONES / diarias', 'EL', 'AGUA'] } },
     ]);
-    expect(r.anchors).toEqual([0, 9]);
-    expect(r.moved[0].by).toBe('texto');
+    // «AGUA» (5) se dice antes que «pequeñas acciones» (9); «EL» no cuenta.
+    expect(r.anchors).toEqual([0, 5]);
+  });
+
+  it('una frase de varias palabras necesita sus dos primeras (no basta una palabra repetida antes)', () => {
+    const words = W('Obtener los umbrales es el comienzo. Ahora bien, obtener un umbral es solo una parte del proceso.');
+    const r = syncAnchors(words, [
+      { anchorWordIndex: 0, pfc: 'inicio' },
+      { anchorWordIndex: 9, pfc: 'obtener un umbral', keyframe: { texts: ['OBTENER UN UMBRAL'] } },
+    ]);
+    expect(r.anchors).toEqual([0, 8]);
   });
 
   it('no cruza el ancla del plano anterior ni la del siguiente', () => {
@@ -47,7 +66,6 @@ describe('palabra clave al inicio del clip (hito 13a, T5, ADR-181)', () => {
       { anchorWordIndex: 5, pfc: 'agua' },
       { anchorWordIndex: 8, pfc: 'siete' },
     ]);
-    // «agua» más cercana a 5 dentro de (0, 8): la 4.
     expect(r.anchors).toEqual([0, 4, 8]);
   });
 

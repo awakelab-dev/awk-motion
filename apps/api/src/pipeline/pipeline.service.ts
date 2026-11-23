@@ -36,6 +36,7 @@ import {
   type KeyframeMediaFrame,
   V4_MAX_CHARS,
   leadFramesFor,
+  SYNC_RULE,
 } from '@wilox/shared';
 import {
   clipVideoPrompt,
@@ -783,14 +784,14 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     const words = rec.words!;
     const sync = syncAnchors(words, rec.shots!);
     const shots = rec.shots!.map((sh, i) => ({ ...sh, anchorWordIndex: sync.anchors[i] }));
-    const plan = planShots(words, shots, s.paragraphs, s.totalFrames!, leadFramesFor('v2'));
+    const plan = planShots(words, shots, s.paragraphs, s.totalFrames!, leadFramesFor(SYNC_RULE));
     if (plan.length !== shots.length) throw new Error(`Con la sincronía nueva no caben todos los planos (${plan.length} de ${shots.length}); no se aplicó.`);
     const changed = plan.filter((p, i) => p.startFrame !== rec.plan![i]?.startFrame).length;
     rec.shots = shots;
     rec.plan = plan;
     this.store.update(rec, (st) => {
       st.clips.forEach((c, i) => ((c.startFrame = plan[i].startFrame), (c.slotEndFrame = plan[i].slotEndFrame)));
-      st.syncRule = 'v2';
+      st.syncRule = SYNC_RULE;
       if (changed) {
         st.finalUrl = undefined;
         st.finalFrames = undefined;
@@ -799,7 +800,7 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
     await this.savePrompt(rec, 'plan.json', JSON.stringify(plan.map((pl, i) => ({ clip: `clip${nn(i + 1)}`, pfc: shots[i].pfc, layout: shots[i].keyframe.layout, ...pl })), null, 2));
     this.store.log(
       rec,
-      `Sincronía reajustada (sin costo): los clips empiezan 0,5 s antes de su frase clave; ${sync.moved.length} ancla(s) corregida(s)` +
+      `Sincronía reajustada (sin costo): los clips empiezan 0,5 s antes del primer texto que muestran; ${sync.moved.length} ancla(s) corregida(s)` +
         (sync.moved.length ? ` (${sync.moved.map((m) => `«${shots[m.shot].pfc}» ${words[m.from]?.word} → ${words[m.to]?.word}`).join(' · ')})` : '') +
         `; ${changed} de ${plan.length} clips cambian de inicio.`,
     );
@@ -1241,14 +1242,14 @@ export class PipelineService implements OnApplicationBootstrap, BeforeApplicatio
       .map((sh) => ({ ...sh, anchorWordIndex: Math.max(0, Math.min(words.length - 1, Math.round(sh.anchorWordIndex))) }))
       .sort((a, b) => a.anchorWordIndex - b.anchorWordIndex);
     shots[0].anchorWordIndex = 0;
-    // Palabra clave al inicio del clip (T5, ADR-181): el código verifica que cada ancla sea la primera palabra de su frase clave.
-    if (s.syncRule === 'v2') {
+    // Palabra clave al inicio del clip (T5, ADR-181/183): el código verifica que cada ancla sea el primer texto en pantalla que dice la voz.
+    if (s.syncRule) {
       const sync = syncAnchors(words, shots);
       sync.anchors.forEach((a, i) => (shots[i].anchorWordIndex = a));
       if (sync.moved.length)
         this.store.log(
           rec,
-          `Sincronía: ${sync.moved.length} ancla(s) corregida(s) a la primera palabra de su frase clave (${sync.moved.map((m) => `«${shots[m.shot].pfc}» ${words[m.from]?.word} → ${words[m.to]?.word}`).join(' · ')}).`,
+          `Sincronía: ${sync.moved.length} ancla(s) corregida(s) al primer texto en pantalla que dice la voz (${sync.moved.map((m) => `«${shots[m.shot].pfc}» ${words[m.from]?.word} → ${words[m.to]?.word}`).join(' · ')}).`,
         );
     }
     if (!rec.theme.usesMediaFrames) shots.forEach((sh) => (sh.keyframe.mediaFrames = []));

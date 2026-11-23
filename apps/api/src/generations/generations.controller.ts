@@ -24,7 +24,7 @@ import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 import type { Request, Response } from 'express';
 import { map, type Observable } from 'rxjs';
 import { z } from 'zod';
-import { FPS, KEYFRAME_REFS_MAX, MAX_REFERENCES_IN_PROMPT, SOUND_MODES, type SoundMode, type ThemeStyle, type AuthUser, type GenerationSummary, type HistoryResponse, type PromptSummary, type RunState } from '@wilox/shared';
+import { FPS, SYNC_RULE, KEYFRAME_REFS_MAX, MAX_REFERENCES_IN_PROMPT, SOUND_MODES, type SoundMode, type ThemeStyle, type AuthUser, type GenerationSummary, type HistoryResponse, type PromptSummary, type RunState } from '@wilox/shared';
 import { CurrentUser } from '../auth/decorators.js';
 import { Inject } from '@nestjs/common';
 import type { Db } from '@wilox/db';
@@ -308,7 +308,7 @@ export class GenerationsController {
         voiceMode: this.providers.mode === 'mcp' || v4 ? 'paragraph' : env.VOICE_MODE,
         ...(v4 ? { voiceModel: 'v4' as const, voiceSeed: voice.seed } : {}),
         // Palabra clave al inicio del clip (T5, ADR-181): todo storyboard nuevo usa la regla v2.
-        syncRule: 'v2' as const,
+        syncRule: SYNC_RULE,
         // Velocidad de la narración del proyecto (T2, ADR-178): se aplica al pedir la voz.
         ...(voice && Math.abs(voice.speed - 1) > 1e-3 ? { voiceSpeed: voice.speed } : {}),
         script: o.script,

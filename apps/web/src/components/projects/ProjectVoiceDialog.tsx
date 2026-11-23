@@ -295,8 +295,8 @@ export function ProjectVoiceDialog({ project, onClose, onChanged }: { project: P
               sync && (
                 <>
                   <p className="text-muted-foreground leading-relaxed">
-                    {sync.old === 1 ? 'Un video tiene' : `${sync.old} videos tienen`} la sincronía de antes (el clip empieza 1 s antes de donde Opus ancló el plano). «Reajustar
-                    sincronía» hace empezar cada clip 0,5 s antes de que la voz diga su frase clave. Sin costo: no pide voz, fotogramas ni clips; se rehace el final.
+                    {sync.old === 1 ? 'Un video tiene' : `${sync.old} videos tienen`} una sincronía anterior. «Reajustar sincronía» hace empezar cada clip 0,5 s antes de que la voz
+                    diga el primer texto que muestra en pantalla. Sin costo: no pide voz, fotogramas ni clips; se rehace el final.
                     {sync.blocked.length > 0 && ` Ahora no se pueden ${sync.blocked.length} (trabajando o sin terminar): quedan para después.`}
                   </p>
                   <div>

@@ -267,7 +267,7 @@ export async function loadRun(db: Db, id: string, dirOf: (relDir: string) => str
     voiceModel: g.voiceModel === 'v4' ? 'v4' : undefined,
     voiceSeed: g.voiceSeed ?? undefined,
     voiceSpeed: g.voiceSpeed ?? undefined,
-    syncRule: g.syncRule === 'v2' ? 'v2' : undefined,
+    syncRule: g.syncRule === 'v2' || g.syncRule === 'v3' ? g.syncRule : undefined,
     script: (g.script as unknown as RunState['script']) ?? undefined,
     text: g.text,
     status: g.status,

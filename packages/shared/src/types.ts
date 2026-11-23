@@ -180,10 +180,11 @@ export interface RunState {
   /** Velocidad aplicada a la locución actual (hito 13a, T2, ADR-178); sin el campo = 1. */
   voiceSpeed?: number;
   /**
-   * Regla de sincronía de los planos (hito 13a, T5, ADR-181): 'v2' = el ancla es la primera palabra de la frase clave y
+   * Regla de sincronía de los planos (hito 13a, T5, ADR-181/183): 'v3' = el ancla es el primero de los textos en pantalla
+   * que dice la voz ('v2', la primera versión, anclaba en la frase clave de Opus) y
    * el clip empieza 0,5 s antes; sin el campo = la de antes (1 s antes del ancla de Opus).
    */
-  syncRule?: 'v2';
+  syncRule?: 'v2' | 'v3';
   text: string;
   status: RunStatus;
   /** Mensaje corto del paso en curso. */
